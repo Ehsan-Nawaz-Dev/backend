@@ -11,6 +11,18 @@ import { whatsappService } from "./services/whatsappService.js";
 dotenv.config();
 
 const app = express();
+<<<<<<< HEAD
+=======
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: process.env.FRONTEND_APP_URL || "http://localhost:5173",
+    methods: ["GET", "POST"],
+  },
+});
+
+const PORT = process.env.PORT || 3000;
+>>>>>>> 627cfdda0c0b7c5b07330bb151496de0343dd755
 
 // Middleware
 app.use(cors());
