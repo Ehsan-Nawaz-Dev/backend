@@ -13,6 +13,92 @@ import whatsappCloudRouter from "./whatsapp-cloud.js";
 
 const router = Router();
 
+// GET /api - List all available API endpoints
+router.get("/", (req, res) => {
+    res.json({
+        message: "WhatFlow Backend API - Available Endpoints",
+        version: "1.0.0",
+        baseUrl: "/api",
+        endpoints: {
+            settings: {
+                basePath: "/api/settings",
+                description: "Manage application settings and configurations",
+                methods: ["GET", "POST", "PUT", "DELETE"]
+            },
+            templates: {
+                basePath: "/api/templates",
+                description: "Manage WhatsApp message templates",
+                methods: ["GET", "POST", "PUT", "DELETE"]
+            },
+            whatsapp: {
+                basePath: "/api/whatsapp",
+                description: "WhatsApp Web integration endpoints",
+                endpoints: [
+                    { method: "GET", path: "/status", description: "Get WhatsApp connection status" },
+                    { method: "POST", path: "/connect", description: "Initialize WhatsApp connection" },
+                    { method: "POST", path: "/disconnect", description: "Disconnect WhatsApp" },
+                    { method: "POST", path: "/send", description: "Send a WhatsApp message" },
+                    { method: "GET", path: "/qr", description: "Get QR code for WhatsApp Web" }
+                ]
+            },
+            whatsappCloud: {
+                basePath: "/api/whatsapp-cloud",
+                description: "WhatsApp Cloud API integration endpoints",
+                endpoints: [
+                    { method: "POST", path: "/send", description: "Send message via WhatsApp Cloud API" },
+                    { method: "POST", path: "/send-template", description: "Send template message" },
+                    { method: "GET", path: "/templates", description: "Get available message templates" },
+                    { method: "POST", path: "/webhook", description: "WhatsApp Cloud API webhook" },
+                    { method: "GET", path: "/webhook", description: "Verify WhatsApp webhook" }
+                ]
+            },
+            webhooks: {
+                shopify: {
+                    basePath: "/api/webhooks/shopify",
+                    description: "Shopify webhook handlers",
+                    methods: ["POST"]
+                },
+                whatsapp: {
+                    basePath: "/api/webhooks/whatsapp",
+                    description: "WhatsApp webhook handlers",
+                    methods: ["GET", "POST"]
+                }
+            },
+            activity: {
+                basePath: "/api/activity",
+                description: "Track and retrieve activity logs",
+                methods: ["GET", "POST"]
+            },
+            contact: {
+                basePath: "/api/contact",
+                description: "Manage contacts and customer information",
+                methods: ["GET", "POST", "PUT", "DELETE"]
+            },
+            notifications: {
+                basePath: "/api/notifications",
+                description: "Manage and send notifications",
+                methods: ["GET", "POST", "PUT", "DELETE"]
+            },
+            analytics: {
+                basePath: "/api/analytics",
+                description: "Analytics and reporting endpoints",
+                methods: ["GET"]
+            },
+            auth: {
+                shopify: {
+                    basePath: "/api/auth/shopify",
+                    description: "Shopify authentication and OAuth",
+                    methods: ["GET"]
+                }
+            }
+        },
+        documentation: {
+            whatsappCloudAPI: "See WHATSAPP_CLOUD_API.md for WhatsApp Cloud API documentation",
+            whatsappWebAPI: "See WHATSAPP_API.md for WhatsApp Web API documentation"
+        }
+    });
+});
+
 router.use("/settings", settingsRouter);
 router.use("/templates", templatesRouter);
 router.use("/webhooks/shopify", shopifyWebhooksRouter);
