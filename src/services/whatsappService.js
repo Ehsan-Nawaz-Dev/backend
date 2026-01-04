@@ -29,7 +29,7 @@ class WhatsAppService {
                     clientId: shopDomain,
                 }),
                 puppeteer: {
-                    headless: true,
+                    headless: false, // Temporarily set to false for debugging
                     args: [
                         "--no-sandbox",
                         "--disable-setuid-sandbox",
@@ -38,8 +38,19 @@ class WhatsAppService {
                         "--no-first-run",
                         "--no-zygote",
                         "--disable-gpu",
+                        "--disable-extensions",
+                        "--disable-blink-features=AutomationControlled",
                     ],
                 },
+            });
+
+            // Log all client events for debugging
+            client.on("loading_screen", (percent, message) => {
+                console.log(`[${shopDomain}] Loading: ${percent}% - ${message}`);
+            });
+
+            client.on("change_state", (state) => {
+                console.log(`[${shopDomain}] State changed to: ${state}`);
             });
 
             // Update session status to connecting

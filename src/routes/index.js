@@ -10,6 +10,7 @@ import analyticsRouter from "./analytics.js";
 import shopifyAuthRouter from "./auth-shopify.js";
 import whatsappRouter from "./whatsapp.js";
 import whatsappCloudRouter from "./whatsapp-cloud.js";
+import qrcodeRouter from "./qrcode.js";
 
 const router = Router();
 
@@ -90,6 +91,14 @@ router.get("/", (req, res) => {
                     description: "Shopify authentication and OAuth",
                     methods: ["GET"]
                 }
+            },
+            qrcode: {
+                basePath: "/api/qrcode",
+                description: "QR code generation for URLs",
+                endpoints: [
+                    { method: "POST", path: "/generate", description: "Generate QR code (returns JSON with data URL)" },
+                    { method: "GET", path: "/generate?url=YOUR_URL", description: "Generate QR code (returns image directly)" }
+                ]
             }
         },
         documentation: {
@@ -110,5 +119,6 @@ router.use("/analytics", analyticsRouter);
 router.use("/auth/shopify", shopifyAuthRouter);
 router.use("/whatsapp", whatsappRouter);
 router.use("/whatsapp-cloud", whatsappCloudRouter);
+router.use("/qrcode", qrcodeRouter);
 
 export default router;
