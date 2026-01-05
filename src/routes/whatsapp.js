@@ -111,6 +111,11 @@ router.post("/pair", async (req, res) => {
         if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
         if (!phoneNumber) return res.status(400).json({ error: "Missing phone parameter" });
 
+        // Warning for Vercel environments
+        if (process.env.VERCEL === "1") {
+            console.warn(`Pairing requested for ${shopDomain} on Vercel. This will likely fail due to serverless timeout.`);
+        }
+
         const result = await whatsappService.requestPairingCode(shopDomain, phoneNumber);
 
         if (result.success) {

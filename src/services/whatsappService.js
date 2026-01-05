@@ -2,7 +2,8 @@ import makeWASocket, {
     useMultiFileAuthState,
     DisconnectReason,
     fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore
+    makeCacheableSignalKeyStore,
+    Browsers
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { WhatsAppSession } from "../models/WhatsAppSession.js";
@@ -50,7 +51,7 @@ class WhatsAppService {
                     keys: makeCacheableSignalKeyStore(state.keys, logger),
                 },
                 logger,
-                browser: ["WhatFlow", "Chrome", "1.0.0"],
+                browser: Browsers.macOS("Desktop"),
             });
 
             this.sockets.set(shopDomain, sock);
@@ -71,7 +72,7 @@ class WhatsAppService {
                 const { connection, lastDisconnect, qr } = update;
 
                 if (qr) {
-                    console.log(`QR Code generated for ${shopDomain}`);
+                    console.log(`QR Code generated for ${shopDomain}. Pairing state: ${qr}`);
                     const qrCodeDataURL = await qrcode.toDataURL(qr);
 
                     await WhatsAppSession.findOneAndUpdate(
@@ -142,6 +143,9 @@ class WhatsAppService {
             }
 
             // Initialize separately without triggering the internal pairing logic
+            // Ensure any existing non-functional socket is cleared
+            await this.disconnectClient(shopDomain);
+
             const initResult = await this.initializeClient(shopDomain);
             if (!initResult.success) {
                 return initResult;
@@ -176,6 +180,15 @@ class WhatsAppService {
             return { success: true, pairingCode: code };
         } catch (error) {
             console.error(`Error requesting pairing code for ${shopDomain}:`, error);
+
+            // Clean up on failure
+            const sock = this.sockets.get(shopDomain);
+            if (sock) {
+                sock.ev.removeAllListeners();
+                try { sock.end(); } catch (e) { }
+                this.sockets.delete(shopDomain);
+            }
+
             return { success: false, error: error.message || "Failed to get pairing code" };
         }
     }
