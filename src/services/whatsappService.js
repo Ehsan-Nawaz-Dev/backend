@@ -25,6 +25,19 @@ class WhatsAppService {
 
     async initializeClient(shopDomain) {
         try {
+            // Close existing socket if any
+            const existingSock = this.sockets.get(shopDomain);
+            if (existingSock) {
+                console.log(`Closing existing socket for ${shopDomain}`);
+                existingSock.ev.removeAllListeners();
+                try {
+                    existingSock.end();
+                } catch (e) {
+                    console.error("Error ending socket:", e);
+                }
+                this.sockets.delete(shopDomain);
+            }
+
             const authPath = path.join(os.tmpdir(), "auth_info", shopDomain);
             const { state, saveCreds } = await useMultiFileAuthState(authPath);
             const { version } = await fetchLatestBaileysVersion();
@@ -129,7 +142,10 @@ class WhatsAppService {
             }
 
             // Initialize separately without triggering the internal pairing logic
-            await this.initializeClient(shopDomain);
+            const initResult = await this.initializeClient(shopDomain);
+            if (!initResult.success) {
+                return initResult;
+            }
 
             await WhatsAppSession.findOneAndUpdate(
                 { shopDomain },
@@ -142,6 +158,12 @@ class WhatsAppService {
             const sock = this.sockets.get(shopDomain);
             if (!sock) {
                 throw new Error("Socket not initialized");
+            }
+
+            // Check if it automatically connected (e.g. from existing /tmp auth)
+            if (sock.user) {
+                const user = sock.user.id.split(":")[0];
+                return { success: false, error: `Already connected with ${user}` };
             }
 
             console.log(`Requesting pairing code for ${shopDomain} with number ${formattedNumber}`);
@@ -162,7 +184,12 @@ class WhatsAppService {
         try {
             const sock = this.sockets.get(shopDomain);
             if (sock) {
-                await sock.logout();
+                sock.ev.removeAllListeners();
+                try {
+                    sock.logout();
+                } catch (e) {
+                    sock.end();
+                }
                 this.sockets.delete(shopDomain);
             }
             const authPath = path.join(os.tmpdir(), "auth_info", shopDomain);
