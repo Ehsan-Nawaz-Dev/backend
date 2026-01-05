@@ -17,6 +17,16 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
 
+// Database connection middleware for serverless
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    res.status(500).json({ error: "Database connection failed" });
+  }
+});
+
 // Health check
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "whatflow-backend" });
@@ -78,4 +88,7 @@ if (process.env.VERCEL !== "1") {
       console.error("Failed to start server", err);
       process.exit(1);
     });
+} else {
+  // In serverless environment, we still want to trigger the connection
+  connectDB().catch(err => console.error("Initial DB connection failed in serverless mode", err));
 }
