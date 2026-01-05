@@ -9,6 +9,7 @@ import { WhatsAppSession } from "../models/WhatsAppSession.js";
 import qrcode from "qrcode";
 import fs from "fs";
 import path from "path";
+import os from "os";
 
 const logger = pino({ level: "info" });
 
@@ -24,7 +25,7 @@ class WhatsAppService {
 
     async initializeClient(shopDomain) {
         try {
-            const authPath = path.join(process.cwd(), "auth_info", shopDomain);
+            const authPath = path.join(os.tmpdir(), "auth_info", shopDomain);
             const { state, saveCreds } = await useMultiFileAuthState(authPath);
             const { version } = await fetchLatestBaileysVersion();
 
@@ -164,7 +165,7 @@ class WhatsAppService {
                 await sock.logout();
                 this.sockets.delete(shopDomain);
             }
-            const authPath = path.join(process.cwd(), "auth_info", shopDomain);
+            const authPath = path.join(os.tmpdir(), "auth_info", shopDomain);
             if (fs.existsSync(authPath)) {
                 fs.rmSync(authPath, { recursive: true, force: true });
             }
