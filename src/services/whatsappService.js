@@ -183,83 +183,76 @@ class WhatsAppService {
         }
     }
 
-    async disconnectClient(shopDomain) {
+    async requestPairingCode(shopDomain, phoneNumber) {
         try {
-            const client = this.clients.get(shopDomain);
-
-            if (!client) {
-                return { success: false, error: "Client not found" };
-            }
-
-            await client.destroy();
-            this.clients.delete(shopDomain);
-
-            await WhatsAppSession.findOneAndUpdate(
-                { shopDomain },
-                {
-                    isConnected: false,
-                    status: "disconnected",
-                    qrCode: null,
+            // Check if client already exists and is connected
+            if (this.clients.has(shopDomain)) {
+                const existingClient = this.clients.get(shopDomain);
+                if (existingClient.info) {
+                    return { success: false, error: "Session already active" };
                 }
-            );
-
-            return { success: true };
-        } catch (error) {
-            console.error(`Error disconnecting WhatsApp client for ${shopDomain}:`, error);
-            return { success: false, error: error.message };
-        }
-    }
-
-    async getConnectionStatus(shopDomain) {
-        try {
-            const session = await WhatsAppSession.findOne({ shopDomain });
-            const client = this.clients.get(shopDomain);
-
-            if (!session) {
-                return {
-                    isConnected: false,
-                    status: "disconnected",
-                };
+                // If initializing or qr_ready, we might want to restart or just use it
+                // But for pairing code, it's safer to ensure a fresh state or specific flow
             }
 
-            // Check if client is actually connected
-            const isClientConnected = client && client.info !== null;
+            // Initialize client if not already done or if we want to ensure it's ready for pairing
+            // We can reuse initializeClient but we need to know when it's ready to request code
 
-            return {
-                isConnected: isClientConnected,
-                status: session.status,
-                phoneNumber: session.phoneNumber,
-                qrCode: session.qrCode,
-                lastConnected: session.lastConnected,
-                errorMessage: session.errorMessage,
-            };
-        } catch (error) {
-            console.error(`Error getting connection status for ${shopDomain}:`, error);
-            return {
-                isConnected: false,
-                status: "error",
-                errorMessage: error.message,
-            };
-        }
-    }
-
-    async sendMessage(shopDomain, phoneNumber, message) {
-        try {
-            const client = this.clients.get(shopDomain);
-
-            if (!client || !client.info) {
-                return { success: false, error: "WhatsApp client not connected" };
-            }
-
-            // Format phone number (remove + and add country code if needed)
+            // Format phone number (remove + and non-digits)
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
-            const chatId = `${formattedNumber}@c.us`;
 
-            await client.sendMessage(chatId, message);
+            if (!formattedNumber) {
+                return { success: false, error: "Invalid phone number" };
+            }
 
-            return { success: true };
+            // If client doesn't exist, start it
+            if (!this.clients.has(shopDomain)) {
+                await this.initializeClient(shopDomain);
+            }
+
+            const client = this.clients.get(shopDomain);
+
+            // Wait for client to be initialized enough to request pairing code
+            // whatsapp-web.js requires the client to be in a state where it's ready to show QR or Pairing Code
+
+            return new Promise((resolve, reject) => {
+                const onQr = async () => {
+                    try {
+                        const code = await client.requestPairingCode(formattedNumber);
+
+                        // Update status to pairing
+                        await WhatsAppSession.findOneAndUpdate(
+                            { shopDomain },
+                            { status: "pairing", qrCode: null }
+                        );
+
+                        // Cleanup listeners
+                        client.off("qr", onQr);
+                        client.off("ready", onReady);
+
+                        resolve({ success: true, pairingCode: code });
+                    } catch (err) {
+                        client.off("qr", onQr);
+                        client.off("ready", onReady);
+                        reject(err);
+                    }
+                };
+
+                const onReady = () => {
+                    client.off("qr", onQr);
+                    client.off("ready", onReady);
+                    resolve({ success: false, error: "Already connected" });
+                };
+
+                client.once("qr", onQr);
+                client.once("ready", onReady);
+
+                // If it's already in a state where it has a QR or is ready, we might need to handle it
+                // But usually initializeClient starts the process and 'qr' will fire.
+            });
+
         } catch (error) {
-            console.error(`Error sending message for ${shopDomain}:`, error);
+            console.error(`[${shopDomain}] Error requesting pairing code:`, error);
             return { success: false, error: error.message };
         }
     }

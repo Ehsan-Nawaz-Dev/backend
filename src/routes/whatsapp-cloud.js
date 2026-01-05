@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { whatsappCloudService } from "../services/whatsappCloudService.js";
+import { ActivityLog } from "../models/ActivityLog.js";
 
 const router = Router();
 
@@ -167,13 +168,32 @@ router.post("/webhooks", async (req, res) => {
         if (result.success) {
             console.log("Processed message:", result.data);
 
-            // Mark message as read (optional)
-            if (result.data.messageId) {
-                await whatsappCloudService.markMessageAsRead(result.data.messageId);
+            const { messageId, from, text, contactName, rawPayload } = result.data;
+
+            // Log activity to database
+            try {
+                // Since this is a webhook, we might not have a merchant ID easily available 
+                // in the payload. For now, we'll log it with a null merchant or find the 
+                // merchant who owns this phone number ID.
+                // TODO: Implement merchant lookup based on phoneNumberId
+
+                await ActivityLog.create({
+                    merchant: null, // Should be populated once multi-tenant logic is finalized
+                    type: "pending",
+                    customerName: contactName || from,
+                    message: text || "Incoming media message",
+                    channel: "whatsapp-cloud",
+                    rawPayload: webhookBody
+                });
+                console.log("Activity logged for incoming message from", from);
+            } catch (logError) {
+                console.error("Error logging activity:", logError);
             }
 
-            // TODO: Store message in database or trigger business logic
-            // For example: save to ActivityLog, trigger automated responses, etc.
+            // Mark message as read (optional)
+            if (messageId) {
+                await whatsappCloudService.markMessageAsRead(messageId);
+            }
 
             res.status(200).json({ success: true });
         } else {

@@ -102,6 +102,34 @@ router.post("/send", async (req, res) => {
     }
 });
 
+// POST /api/whatsapp/pair - Request pairing code
+router.post("/pair", async (req, res) => {
+    try {
+        const shopDomain = getShopDomain(req);
+        const phoneNumber = req.body.phone || req.query.phone;
+
+        if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
+        if (!phoneNumber) return res.status(400).json({ error: "Missing phone parameter" });
+
+        const result = await whatsappService.requestPairingCode(shopDomain, phoneNumber);
+
+        if (result.success) {
+            res.json({
+                success: true,
+                pairingCode: result.pairingCode
+            });
+        } else {
+            res.status(400).json({
+                success: false,
+                error: result.error
+            });
+        }
+    } catch (err) {
+        console.error("Error requesting pairing code", err);
+        res.status(500).json({ error: "Internal server error", message: err.message });
+    }
+});
+
 // GET /api/whatsapp/qr - Get current QR code
 router.get("/qr", async (req, res) => {
     try {
