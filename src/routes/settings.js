@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { Merchant } from "../models/Merchant.js";
+import { ChatButtonSettings } from "../models/ChatButtonSettings.js";
 
 const router = Router();
 
@@ -46,6 +47,58 @@ router.put("/", async (req, res) => {
     res.json(merchant);
   } catch (err) {
     console.error("Error updating settings", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/settings/chat-button
+router.get("/chat-button", async (req, res) => {
+  try {
+    const shopDomain = getShopDomain(req);
+    if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
+
+    let settings = await ChatButtonSettings.findOne({ shopDomain });
+    if (!settings) {
+      // Return defaults if not found
+      settings = {
+        shopDomain,
+        buttonText: "Chat with us",
+        position: "right",
+        color: "#25D366",
+        enabled: true
+      };
+    }
+
+    res.json(settings);
+  } catch (err) {
+    console.error("Error fetching chat button settings", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/settings/chat-button
+router.post("/chat-button", async (req, res) => {
+  try {
+    const shopDomain = getShopDomain(req);
+    if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
+
+    const update = {
+      phoneNumber: req.body.phoneNumber,
+      buttonText: req.body.buttonText,
+      position: req.body.position,
+      color: req.body.color,
+      enabled: req.body.enabled,
+    };
+
+    const settings = await ChatButtonSettings.findOneAndUpdate(
+      { shopDomain },
+      { $set: update },
+      { new: true, upsert: true }
+    );
+
+    res.json(settings);
+  } catch (err) {
+    console.error("Error updating chat button settings", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });

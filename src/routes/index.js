@@ -11,6 +11,8 @@ import shopifyAuthRouter from "./auth-shopify.js";
 import whatsappRouter from "./whatsapp.js";
 import whatsappCloudRouter from "./whatsapp-cloud.js";
 import qrcodeRouter from "./qrcode.js";
+import automationsRouter from "./automations.js";
+import campaignsRouter from "./campaigns.js";
 
 const router = Router();
 
@@ -99,6 +101,16 @@ router.get("/", (req, res) => {
                     { method: "POST", path: "/generate", description: "Generate QR code (returns JSON with data URL)" },
                     { method: "GET", path: "/generate?url=YOUR_URL", description: "Generate QR code (returns image directly)" }
                 ]
+            },
+            automations: {
+                basePath: "/api/automations",
+                description: "Manage automated message flows and stats",
+                methods: ["GET", "PUT"]
+            },
+            campaigns: {
+                basePath: "/api/campaigns",
+                description: "Bulk marketing campaign management",
+                methods: ["POST", "GET"]
             }
         },
         documentation: {
@@ -120,5 +132,7 @@ router.use("/auth/shopify", shopifyAuthRouter);
 router.use("/whatsapp", whatsappRouter);
 router.use("/whatsapp-cloud", whatsappCloudRouter);
 router.use("/qrcode", qrcodeRouter);
+router.use("/automations", automationsRouter);
+router.use("/campaigns", campaignsRouter);
 
 export default router;
