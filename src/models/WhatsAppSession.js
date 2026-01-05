@@ -9,7 +9,7 @@ const WhatsAppSessionSchema = new mongoose.Schema(
         phoneNumber: { type: String }, // Connected WhatsApp number
         status: {
             type: String,
-            enum: ["disconnected", "connecting", "qr_ready", "connected", "error"],
+            enum: ["disconnected", "connecting", "pairing", "qr_ready", "connected", "error"],
             default: "disconnected"
         },
         lastConnected: { type: Date },

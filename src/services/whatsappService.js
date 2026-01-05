@@ -1,266 +1,208 @@
-import pkg from "whatsapp-web.js";
-const { Client, LocalAuth } = pkg;
-import qrcode from "qrcode";
+import makeWASocket, {
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    makeCacheableSignalKeyStore
+} from "@whiskeysockets/baileys";
+import pino from "pino";
 import { WhatsAppSession } from "../models/WhatsAppSession.js";
+import qrcode from "qrcode";
+import fs from "fs";
+import path from "path";
+
+const logger = pino({ level: "info" });
 
 class WhatsAppService {
     constructor() {
-        this.clients = new Map(); // shopDomain -> Client instance
-        this.io = null; // Socket.io instance (set later)
+        this.sockets = new Map(); // shopDomain -> socket instance
+        this.io = null; // Socket.io instance
     }
 
     setSocketIO(io) {
         this.io = io;
     }
 
-    async initializeClient(shopDomain) {
+    async initializeClient(shopDomain, pairingPhone = null) {
         try {
-            // Check if client already exists
-            if (this.clients.has(shopDomain)) {
-                const existingClient = this.clients.get(shopDomain);
-                if (existingClient.info) {
-                    return { success: true, status: "already_connected" };
-                }
-            }
+            const authPath = path.join(process.cwd(), "auth_info", shopDomain);
+            const { state, saveCreds } = await useMultiFileAuthState(authPath);
+            const { version } = await fetchLatestBaileysVersion();
 
-            // Create new client
-            const client = new Client({
-                authStrategy: new LocalAuth({
-                    clientId: shopDomain,
-                }),
-                puppeteer: {
-                    headless: false, // Temporarily set to false for debugging
-                    args: [
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-accelerated-2d-canvas",
-                        "--no-first-run",
-                        "--no-zygote",
-                        "--disable-gpu",
-                        "--disable-extensions",
-                        "--disable-blink-features=AutomationControlled",
-                    ],
+            const sock = makeWASocket({
+                version,
+                printQRInTerminal: false,
+                auth: {
+                    creds: state.creds,
+                    keys: makeCacheableSignalKeyStore(state.keys, logger),
                 },
+                logger,
+                browser: ["WhatFlow", "Chrome", "1.0.0"],
             });
 
-            // Log all client events for debugging
-            client.on("loading_screen", (percent, message) => {
-                console.log(`[${shopDomain}] Loading: ${percent}% - ${message}`);
-            });
-
-            client.on("change_state", (state) => {
-                console.log(`[${shopDomain}] State changed to: ${state}`);
-            });
+            this.sockets.set(shopDomain, sock);
 
             // Update session status to connecting
             await WhatsAppSession.findOneAndUpdate(
                 { shopDomain },
                 {
                     sessionId: shopDomain,
-                    status: "connecting",
+                    status: pairingPhone ? "pairing" : "connecting",
                     isConnected: false,
                     qrCode: null,
                 },
                 { upsert: true, new: true }
             );
 
-            // QR Code generation
-            client.on("qr", async (qr) => {
-                console.log(`QR Code generated for ${shopDomain}`);
+            sock.ev.on("connection.update", async (update) => {
+                const { connection, lastDisconnect, qr } = update;
 
-                // Generate QR code as base64 image
-                const qrCodeDataURL = await qrcode.toDataURL(qr);
+                if (qr) {
+                    console.log(`QR Code generated for ${shopDomain}`);
+                    const qrCodeDataURL = await qrcode.toDataURL(qr);
 
-                // Update session with QR code
-                await WhatsAppSession.findOneAndUpdate(
-                    { shopDomain },
-                    {
-                        qrCode: qrCodeDataURL,
-                        status: "qr_ready",
+                    await WhatsAppSession.findOneAndUpdate(
+                        { shopDomain },
+                        { qrCode: qrCodeDataURL, status: "qr_ready" }
+                    );
+
+                    if (this.io) {
+                        this.io.to(shopDomain).emit("qr", { qrCode: qrCodeDataURL });
                     }
-                );
+                }
 
-                // Emit QR code via socket
-                if (this.io) {
-                    this.io.to(shopDomain).emit("qr", { qrCode: qrCodeDataURL });
+                if (connection === "close") {
+                    const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+                    console.log(`Connection closed for ${shopDomain}. Reconnecting: ${shouldReconnect}`);
+
+                    if (shouldReconnect) {
+                        this.initializeClient(shopDomain);
+                    } else {
+                        this.sockets.delete(shopDomain);
+                        await WhatsAppSession.findOneAndUpdate(
+                            { shopDomain },
+                            { isConnected: false, status: "disconnected", qrCode: null }
+                        );
+                    }
+                } else if (connection === "open") {
+                    console.log(`WhatsApp socket ready for ${shopDomain}`);
+                    const user = sock.user.id.split(":")[0];
+
+                    await WhatsAppSession.findOneAndUpdate(
+                        { shopDomain },
+                        {
+                            isConnected: true,
+                            status: "connected",
+                            phoneNumber: user,
+                            lastConnected: new Date(),
+                            qrCode: null,
+                            errorMessage: null,
+                        }
+                    );
+
+                    if (this.io) {
+                        this.io.to(shopDomain).emit("connected", { phoneNumber: user });
+                    }
                 }
             });
 
-            // Ready event
-            client.on("ready", async () => {
-                console.log(`WhatsApp client ready for ${shopDomain}`);
-                const info = client.info;
+            sock.ev.on("creds.update", saveCreds);
 
-                await WhatsAppSession.findOneAndUpdate(
-                    { shopDomain },
-                    {
-                        isConnected: true,
-                        status: "connected",
-                        phoneNumber: info?.wid?.user || info?.me?.user,
-                        lastConnected: new Date(),
-                        qrCode: null,
-                        errorMessage: null,
+            // If we're pairing, request the code
+            if (pairingPhone) {
+                // Wait for the socket to be ready to request code
+                setTimeout(async () => {
+                    try {
+                        const code = await sock.requestPairingCode(pairingPhone);
+                        console.log(`Pairing code for ${shopDomain}: ${code}`);
+                    } catch (err) {
+                        console.error(`Error requesting pairing code for ${shopDomain}:`, err);
                     }
-                );
-
-                // Emit connection success via socket
-                if (this.io) {
-                    this.io.to(shopDomain).emit("connected", {
-                        phoneNumber: info?.wid?.user || info?.me?.user,
-                    });
-                }
-            });
-
-            // Authenticated event
-            client.on("authenticated", async () => {
-                console.log(`WhatsApp client authenticated for ${shopDomain}`);
-            });
-
-            // Disconnected event
-            client.on("disconnected", async (reason) => {
-                console.log(`WhatsApp client disconnected for ${shopDomain}:`, reason);
-
-                await WhatsAppSession.findOneAndUpdate(
-                    { shopDomain },
-                    {
-                        isConnected: false,
-                        status: "disconnected",
-                        qrCode: null,
-                    }
-                );
-
-                // Emit disconnection via socket
-                if (this.io) {
-                    this.io.to(shopDomain).emit("disconnected", { reason });
-                }
-
-                // Remove client from map
-                this.clients.delete(shopDomain);
-            });
-
-            // Authentication failure
-            client.on("auth_failure", async (msg) => {
-                console.log(`Authentication failure for ${shopDomain}:`, msg);
-
-                await WhatsAppSession.findOneAndUpdate(
-                    { shopDomain },
-                    {
-                        isConnected: false,
-                        status: "error",
-                        errorMessage: "Authentication failed",
-                        qrCode: null,
-                    }
-                );
-
-                // Emit error via socket
-                if (this.io) {
-                    this.io.to(shopDomain).emit("error", { message: "Authentication failed" });
-                }
-            });
-
-            // Store client
-            this.clients.set(shopDomain, client);
-
-            // Initialize client
-            await client.initialize();
+                }, 3000);
+            }
 
             return { success: true, status: "initializing" };
         } catch (error) {
-            console.error(`Error initializing WhatsApp client for ${shopDomain}:`, error);
-
-            await WhatsAppSession.findOneAndUpdate(
-                { shopDomain },
-                {
-                    isConnected: false,
-                    status: "error",
-                    errorMessage: error.message,
-                },
-                { upsert: true }
-            );
-
+            console.error(`Error initializing Baileys for ${shopDomain}:`, error);
             return { success: false, error: error.message };
         }
     }
 
     async requestPairingCode(shopDomain, phoneNumber) {
         try {
-            // Check if client already exists and is connected
-            if (this.clients.has(shopDomain)) {
-                const existingClient = this.clients.get(shopDomain);
-                if (existingClient.info) {
-                    return { success: false, error: "Session already active" };
-                }
-                // If initializing or qr_ready, we might want to restart or just use it
-                // But for pairing code, it's safer to ensure a fresh state or specific flow
-            }
-
-            // Initialize client if not already done or if we want to ensure it's ready for pairing
-            // We can reuse initializeClient but we need to know when it's ready to request code
-
-            // Format phone number (remove + and non-digits)
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
+            if (!formattedNumber) return { success: false, error: "Invalid phone number" };
 
-            if (!formattedNumber) {
-                return { success: false, error: "Invalid phone number" };
-            }
+            // Initialize or get existing socket
+            await this.initializeClient(shopDomain, formattedNumber);
+            const sock = this.sockets.get(shopDomain);
 
-            // If client doesn't exist, start it
-            if (!this.clients.has(shopDomain)) {
-                await this.initializeClient(shopDomain);
-            }
-
-            const client = this.clients.get(shopDomain);
-
-            // Wait for client to be initialized enough to request pairing code
-            // whatsapp-web.js requires the client to be in a state where it's ready to show QR or Pairing Code
-
+            // Wait for the code
             return new Promise((resolve, reject) => {
-                const onQr = async () => {
+                const timeout = setTimeout(() => reject(new Error("Pairing code timeout")), 15000);
+
+                const getCode = async () => {
                     try {
-                        const code = await client.requestPairingCode(formattedNumber);
-
-                        // Update status to pairing
-                        await WhatsAppSession.findOneAndUpdate(
-                            { shopDomain },
-                            { status: "pairing", qrCode: null }
-                        );
-
-                        // Cleanup listeners
-                        client.off("qr", onQr);
-                        client.off("ready", onReady);
-
+                        const code = await sock.requestPairingCode(formattedNumber);
+                        clearTimeout(timeout);
                         resolve({ success: true, pairingCode: code });
                     } catch (err) {
-                        client.off("qr", onQr);
-                        client.off("ready", onReady);
+                        clearTimeout(timeout);
                         reject(err);
                     }
                 };
 
-                const onReady = () => {
-                    client.off("qr", onQr);
-                    client.off("ready", onReady);
-                    resolve({ success: false, error: "Already connected" });
-                };
-
-                client.once("qr", onQr);
-                client.once("ready", onReady);
-
-                // If it's already in a state where it has a QR or is ready, we might need to handle it
-                // But usually initializeClient starts the process and 'qr' will fire.
+                setTimeout(getCode, 5000);
             });
-
         } catch (error) {
-            console.error(`[${shopDomain}] Error requesting pairing code:`, error);
             return { success: false, error: error.message };
         }
     }
 
-    getClient(shopDomain) {
-        return this.clients.get(shopDomain);
+    async disconnectClient(shopDomain) {
+        try {
+            const sock = this.sockets.get(shopDomain);
+            if (sock) {
+                await sock.logout();
+                this.sockets.delete(shopDomain);
+            }
+            const authPath = path.join(process.cwd(), "auth_info", shopDomain);
+            if (fs.existsSync(authPath)) {
+                fs.rmSync(authPath, { recursive: true, force: true });
+            }
+            await WhatsAppSession.findOneAndUpdate(
+                { shopDomain },
+                { isConnected: false, status: "disconnected", qrCode: null }
+            );
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    }
+
+    async getConnectionStatus(shopDomain) {
+        const session = await WhatsAppSession.findOne({ shopDomain });
+        const sock = this.sockets.get(shopDomain);
+        return {
+            isConnected: !!(sock?.user),
+            status: session?.status || "disconnected",
+            phoneNumber: session?.phoneNumber,
+            qrCode: session?.qrCode,
+            lastConnected: session?.lastConnected,
+            errorMessage: session?.errorMessage,
+        };
+    }
+
+    async sendMessage(shopDomain, phoneNumber, message) {
+        try {
+            const sock = this.sockets.get(shopDomain);
+            if (!sock || !sock.user) return { success: false, error: "WhatsApp not connected" };
+            const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
+            await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, { text: message });
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
     }
 }
 
-// Export singleton instance
 export const whatsappService = new WhatsAppService();
