@@ -22,7 +22,7 @@ class WhatsAppService {
         this.io = io;
     }
 
-    async initializeClient(shopDomain, pairingPhone = null) {
+    async initializeClient(shopDomain) {
         try {
             const authPath = path.join(process.cwd(), "auth_info", shopDomain);
             const { state, saveCreds } = await useMultiFileAuthState(authPath);
@@ -46,7 +46,7 @@ class WhatsAppService {
                 { shopDomain },
                 {
                     sessionId: shopDomain,
-                    status: pairingPhone ? "pairing" : "connecting",
+                    status: "connecting",
                     isConnected: false,
                     qrCode: null,
                 },
@@ -107,18 +107,7 @@ class WhatsAppService {
 
             sock.ev.on("creds.update", saveCreds);
 
-            // If we're pairing, request the code
-            if (pairingPhone) {
-                // Wait for the socket to be ready to request code
-                setTimeout(async () => {
-                    try {
-                        const code = await sock.requestPairingCode(pairingPhone);
-                        console.log(`Pairing code for ${shopDomain}: ${code}`);
-                    } catch (err) {
-                        console.error(`Error requesting pairing code for ${shopDomain}:`, err);
-                    }
-                }, 3000);
-            }
+
 
             return { success: true, status: "initializing" };
         } catch (error) {
@@ -132,29 +121,39 @@ class WhatsAppService {
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
             if (!formattedNumber) return { success: false, error: "Invalid phone number" };
 
-            // Initialize or get existing socket
-            await this.initializeClient(shopDomain, formattedNumber);
+            // Check if already connected
+            const existingSock = this.sockets.get(shopDomain);
+            if (existingSock && existingSock.user) {
+                return { success: false, error: "Already connected" };
+            }
+
+            // Initialize separately without triggering the internal pairing logic
+            await this.initializeClient(shopDomain);
+
+            await WhatsAppSession.findOneAndUpdate(
+                { shopDomain },
+                { status: "pairing" }
+            );
+
+            // Wait briefly for socket to be ready (heuristic)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
             const sock = this.sockets.get(shopDomain);
+            if (!sock) {
+                throw new Error("Socket not initialized");
+            }
 
-            // Wait for the code
-            return new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => reject(new Error("Pairing code timeout")), 15000);
+            console.log(`Requesting pairing code for ${shopDomain} with number ${formattedNumber}`);
 
-                const getCode = async () => {
-                    try {
-                        const code = await sock.requestPairingCode(formattedNumber);
-                        clearTimeout(timeout);
-                        resolve({ success: true, pairingCode: code });
-                    } catch (err) {
-                        clearTimeout(timeout);
-                        reject(err);
-                    }
-                };
+            // Request pairing code directly
+            // Note: Baileys might require a little time after init before requestPairingCode works reliably
+            const code = await sock.requestPairingCode(formattedNumber);
+            console.log(`Pairing code for ${shopDomain}: ${code}`);
 
-                setTimeout(getCode, 5000);
-            });
+            return { success: true, pairingCode: code };
         } catch (error) {
-            return { success: false, error: error.message };
+            console.error(`Error requesting pairing code for ${shopDomain}:`, error);
+            return { success: false, error: error.message || "Failed to get pairing code" };
         }
     }
 
