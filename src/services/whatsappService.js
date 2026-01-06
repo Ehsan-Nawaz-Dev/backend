@@ -55,6 +55,7 @@ class WhatsAppService {
             });
 
             this.sockets.set(shopDomain, sock);
+            console.log(`Socket instance created and stored for ${shopDomain}`);
 
             // Update session status to connecting
             await WhatsAppSession.findOneAndUpdate(
@@ -156,11 +157,13 @@ class WhatsAppService {
                 { status: "pairing" }
             );
 
-            // Wait briefly for socket to be ready (heuristic)
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Wait longer for socket to be ready on Render/slower hosts
+            console.log(`Waiting 5 seconds for socket handshake preparation...`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
 
             const sock = this.sockets.get(shopDomain);
             if (!sock) {
+                console.error(`Socket for ${shopDomain} disappeared from Map!`);
                 throw new Error("Socket not initialized");
             }
 
