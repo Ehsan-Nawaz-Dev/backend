@@ -13,22 +13,27 @@ router.get("/stats", async (req, res) => {
         if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
 
         const stats = await AutomationStat.find({ shopDomain });
+        const settings = await AutomationSetting.find({ shopDomain });
 
-        // Group stats by type for easier consumption
-        const formattedStats = {
-            abandoned_cart: { sent: 0, recovered: 0, revenue: 0 },
-            order_confirmation: { sent: 0 },
-            fulfillment_update: { sent: 0 }
-        };
+        const types = [
+            { id: "admin-order-alert", name: "Admin Order Alert" },
+            { id: "order-confirmation", name: "Order Confirmation" },
+            { id: "abandoned_cart", name: "Abandoned Cart" },
+            { id: "fulfillment_update", name: "Shipping Update" }
+        ];
 
-        stats.forEach(stat => {
-            if (formattedStats[stat.type]) {
-                formattedStats[stat.type].sent = stat.sent;
-                if (stat.type === "abandoned_cart") {
-                    formattedStats[stat.type].recovered = stat.recovered;
-                    formattedStats[stat.type].revenue = stat.revenue;
-                }
-            }
+        const formattedStats = types.map(t => {
+            const stat = stats.find(s => s.type === t.id);
+            const setting = settings.find(s => s.type === t.id);
+
+            return {
+                id: t.id,
+                name: t.name,
+                sent: stat ? stat.sent : 0,
+                recovered: stat ? stat.recovered : 0,
+                revenue: stat ? stat.revenue : 0,
+                enabled: setting ? setting.enabled : false
+            };
         });
 
         res.json(formattedStats);
@@ -42,13 +47,14 @@ router.get("/stats", async (req, res) => {
 router.put("/toggle", async (req, res) => {
     try {
         const shopDomain = getShopDomain(req);
-        const { type, enabled } = req.body;
+        const { id, enabled, type } = req.body;
+        const automationType = id || type; // Support both for compatibility
 
         if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
-        if (!type) return res.status(400).json({ error: "Missing type parameter" });
+        if (!automationType) return res.status(400).json({ error: "Missing automation identification (id or type)" });
 
         const setting = await AutomationSetting.findOneAndUpdate(
-            { shopDomain, type },
+            { shopDomain, type: automationType },
             { enabled },
             { upsert: true, new: true }
         );

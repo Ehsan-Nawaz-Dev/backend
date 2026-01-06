@@ -13,7 +13,12 @@ router.get("/status", async (req, res) => {
         if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
 
         const status = await whatsappService.getConnectionStatus(shopDomain);
-        res.json(status);
+
+        res.json({
+            connected: status.isConnected,
+            phoneNumber: status.phoneNumber || "",
+            deviceName: status.deviceName || "Desktop"
+        });
     } catch (err) {
         console.error("Error fetching WhatsApp status", err);
         res.status(500).json({ error: "Internal server error" });

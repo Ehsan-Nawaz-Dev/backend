@@ -11,6 +11,7 @@ const TemplateSchema = new mongoose.Schema(
         "checkouts/abandoned",
         "fulfillments/update",
         "orders/cancelled",
+        "admin-order-alert",
       ],
       required: true,
     },

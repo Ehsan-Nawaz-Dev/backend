@@ -5,7 +5,7 @@ const AutomationStatSchema = new mongoose.Schema(
         shopDomain: { type: String, required: true, index: true },
         type: {
             type: String,
-            enum: ["abandoned_cart", "order_confirmation", "fulfillment_update"],
+            enum: ["abandoned_cart", "fulfillment_update", "admin-order-alert", "order-confirmation"],
             required: true
         },
         sent: { type: Number, default: 0 },

@@ -235,6 +235,7 @@ class WhatsAppService {
             isConnected: !!(sock?.user),
             status: session?.status || "disconnected",
             phoneNumber: session?.phoneNumber,
+            deviceName: "Windows Chrome", // Baileys uses this currently
             qrCode: session?.qrCode,
             lastConnected: session?.lastConnected,
             errorMessage: session?.errorMessage,

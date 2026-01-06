@@ -5,6 +5,7 @@ const MerchantSchema = new mongoose.Schema(
     shopDomain: { type: String, required: true, unique: true },
     storeName: { type: String },
     whatsappNumber: { type: String },
+    adminPhoneNumber: { type: String },
     defaultCountry: { type: String },
     language: { type: String },
     orderConfirmTag: { type: String, default: "Confirmed" },
