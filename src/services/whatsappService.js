@@ -13,6 +13,7 @@ import path from "path";
 import os from "os";
 
 const logger = pino({ level: "info" });
+const SERVICE_VERSION = "1.0.2-diag"; // To verify deployment
 
 class WhatsAppService {
     constructor() {
@@ -51,7 +52,7 @@ class WhatsAppService {
                     keys: makeCacheableSignalKeyStore(state.keys, logger),
                 },
                 logger,
-                browser: Browsers.macOS("Desktop"),
+                browser: Browsers.windows("Chrome"), // Widely accepted for pairing
             });
 
             this.sockets.set(shopDomain, sock);
@@ -87,8 +88,12 @@ class WhatsAppService {
                 }
 
                 if (connection === "close") {
-                    const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-                    console.log(`Connection closed for ${shopDomain}. Reconnecting: ${shouldReconnect}`);
+                    const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+                    const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                    console.log(`Connection CLOSED for ${shopDomain}. Status: ${statusCode}. Reconnecting: ${shouldReconnect}`);
+                    if (lastDisconnect?.error) {
+                        console.error(`Full Disconnect Error for ${shopDomain}:`, JSON.stringify(lastDisconnect.error, null, 2));
+                    }
 
                     if (shouldReconnect) {
                         this.initializeClient(shopDomain);
@@ -145,6 +150,7 @@ class WhatsAppService {
 
             // Initialize separately without triggering the internal pairing logic
             // Ensure any existing non-functional socket is cleared
+            console.log(`[${SERVICE_VERSION}] Starting fresh pairing for ${shopDomain}`);
             await this.disconnectClient(shopDomain);
 
             const initResult = await this.initializeClient(shopDomain);
