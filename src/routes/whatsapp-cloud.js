@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { whatsappService } from "../services/whatsappService.js";
 import { whatsappCloudService } from "../services/whatsappCloudService.js";
 import { ActivityLog } from "../models/ActivityLog.js";
 
@@ -19,19 +20,20 @@ router.post("/send", async (req, res) => {
             });
         }
 
-        const result = await whatsappCloudService.sendTextMessage(to, message);
+        const shopDomain = getShopDomain(req);
+        if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
+
+        const result = await whatsappService.sendMessage(shopDomain, to, message);
 
         if (result.success) {
             res.json({
                 success: true,
-                messageId: result.messageId,
-                message: "Message sent successfully",
+                message: "Message sent successfully via Baileys",
             });
         } else {
             res.status(500).json({
                 success: false,
                 error: result.error,
-                details: result.details,
             });
         }
     } catch (err) {
@@ -52,24 +54,22 @@ router.post("/send-template", async (req, res) => {
             });
         }
 
-        const result = await whatsappCloudService.sendTemplateMessage(
-            to,
-            templateName,
-            languageCode || "en",
-            components || []
-        );
+        const shopDomain = getShopDomain(req);
+        if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
+
+        // Optimization: For Baileys, we just send the message as text if it's a template bridge
+        // or we could implement a more complex template-to-text mapper.
+        const result = await whatsappService.sendMessage(shopDomain, to, `Template: ${templateName}`);
 
         if (result.success) {
             res.json({
                 success: true,
-                messageId: result.messageId,
-                message: "Template message sent successfully",
+                message: "Template message bridge sent via Baileys",
             });
         } else {
             res.status(500).json({
                 success: false,
                 error: result.error,
-                details: result.details,
             });
         }
     } catch (err) {
@@ -90,19 +90,20 @@ router.post("/send-image", async (req, res) => {
             });
         }
 
-        const result = await whatsappCloudService.sendImageMessage(to, imageUrl, caption || "");
+        const shopDomain = getShopDomain(req);
+        if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
+
+        const result = await whatsappService.sendMessage(shopDomain, to, `Image: ${imageUrl}. ${caption || ""}`);
 
         if (result.success) {
             res.json({
                 success: true,
-                messageId: result.messageId,
-                message: "Image message sent successfully",
+                message: "Image message bridge sent via Baileys",
             });
         } else {
             res.status(500).json({
                 success: false,
                 error: result.error,
-                details: result.details,
             });
         }
     } catch (err) {
