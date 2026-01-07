@@ -40,7 +40,7 @@ class WhatsAppService {
                 this.sockets.delete(shopDomain);
             }
 
-            const authPath = path.join(os.tmpdir(), "auth_info", shopDomain);
+            const authPath = path.join(process.cwd(), "whatsapp_auth", shopDomain);
             const { state, saveCreds } = await useMultiFileAuthState(authPath);
             const { version } = await fetchLatestBaileysVersion();
 
@@ -52,57 +52,33 @@ class WhatsAppService {
                     keys: makeCacheableSignalKeyStore(state.keys, logger),
                 },
                 logger,
-                browser: Browsers.windows("Chrome"), // Widely accepted for pairing
+                browser: Browsers.windows("Chrome"),
             });
 
             this.sockets.set(shopDomain, sock);
-            console.log(`Socket instance created and stored for ${shopDomain}`);
-
-            // Update session status to connecting
-            await WhatsAppSession.findOneAndUpdate(
-                { shopDomain },
-                {
-                    sessionId: shopDomain,
-                    status: "connecting",
-                    isConnected: false,
-                    qrCode: null,
-                },
-                { upsert: true, new: true }
-            );
 
             sock.ev.on("connection.update", async (update) => {
                 const { connection, lastDisconnect, qr } = update;
 
                 if (qr) {
-                    console.log(`QR Code generated for ${shopDomain}. Pairing state: ${qr}`);
+                    console.log(`QR Code generated for ${shopDomain}`);
                     const qrCodeDataURL = await qrcode.toDataURL(qr);
-
-                    await WhatsAppSession.findOneAndUpdate(
-                        { shopDomain },
-                        { qrCode: qrCodeDataURL, status: "qr_ready" }
-                    );
-
-                    if (this.io) {
-                        this.io.to(shopDomain).emit("qr", { qrCode: qrCodeDataURL });
-                    }
+                    await WhatsAppSession.findOneAndUpdate({ shopDomain }, { qrCode: qrCodeDataURL, status: "qr_ready" });
+                    if (this.io) this.io.to(shopDomain).emit("qr", { qrCode: qrCodeDataURL });
                 }
 
                 if (connection === "close") {
                     const statusCode = (lastDisconnect?.error)?.output?.statusCode;
                     const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
                     console.log(`Connection CLOSED for ${shopDomain}. Status: ${statusCode}. Reconnecting: ${shouldReconnect}`);
-                    if (lastDisconnect?.error) {
-                        console.error(`Full Disconnect Error for ${shopDomain}:`, JSON.stringify(lastDisconnect.error, null, 2));
-                    }
 
                     if (shouldReconnect) {
-                        this.initializeClient(shopDomain);
+                        // For non-logout reasons, just try to re-init after a short delay
+                        setTimeout(() => this.initializeClient(shopDomain), 3000);
                     } else {
-                        this.sockets.delete(shopDomain);
-                        await WhatsAppSession.findOneAndUpdate(
-                            { shopDomain },
-                            { isConnected: false, status: "disconnected", qrCode: null }
-                        );
+                        console.log(`Explicit logout or device removed for ${shopDomain}. Cleaning up.`);
+                        this.disconnectClient(shopDomain);
                     }
                 } else if (connection === "open") {
                     console.log(`WhatsApp socket ready for ${shopDomain}`);
@@ -273,7 +249,7 @@ class WhatsAppService {
                 }
                 this.sockets.delete(shopDomain);
             }
-            const authPath = path.join(os.tmpdir(), "auth_info", shopDomain);
+            const authPath = path.join(process.cwd(), "whatsapp_auth", shopDomain);
             if (fs.existsSync(authPath)) {
                 fs.rmSync(authPath, { recursive: true, force: true });
             }
@@ -284,6 +260,21 @@ class WhatsAppService {
             return { success: true };
         } catch (error) {
             return { success: false, error: error.message };
+        }
+    }
+
+    async warmupSessions() {
+        try {
+            console.log("Warming up active WhatsApp sessions...");
+            const activeSessions = await WhatsAppSession.find({ isConnected: true });
+            console.log(`Found ${activeSessions.length} active sessions to restore.`);
+
+            for (const session of activeSessions) {
+                console.log(`Restoring session for ${session.shopDomain}...`);
+                this.initializeClient(session.shopDomain);
+            }
+        } catch (err) {
+            console.error("Error during session warmup:", err);
         }
     }
 

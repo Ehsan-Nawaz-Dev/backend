@@ -79,6 +79,7 @@ if (process.env.VERCEL !== "1") {
   // Start server after DB connect
   connectDB()
     .then(() => {
+      whatsappService.warmupSessions(); // Restore active connections
       httpServer.listen(PORT, () => {
         console.log(`WhatFlow backend running on port ${PORT}`);
         console.log(`Socket.IO server ready`);
