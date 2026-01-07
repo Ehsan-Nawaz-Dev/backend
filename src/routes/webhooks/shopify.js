@@ -70,19 +70,16 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
     const order = req.body;
     const orderNumber = order.name || order.order_number || `#${order.id}`;
-    const customerName = order.customer?.first_name || order.shipping_address?.first_name || "Customer";
+    const customerName = order.customer ? `${order.customer.first_name} ${order.customer.last_name || ""}`.trim() : "Customer";
 
-    // Format the Customer Phone
-    let customerPhone = order.customer?.phone || order.shipping_address?.phone || order.billing_address?.phone || "";
-    customerPhone = customerPhone.replace(/\D/g, ''); // Remove non-digits
-    if (customerPhone && !customerPhone.startsWith('92')) {
-        customerPhone = '92' + customerPhone; // Ensure country code (Pakistan)
+    // Format the Customer Phone (Robust Extraction)
+    let rawPhone = order.phone || order.customer?.phone || order.shipping_address?.phone || order.billing_address?.phone || order.customer?.default_address?.phone || "";
+    let customerPhoneFormatted = rawPhone.toString().replace(/\D/g, '');
+    if (customerPhoneFormatted && !customerPhoneFormatted.startsWith('92')) {
+        customerPhoneFormatted = '92' + customerPhoneFormatted;
     }
 
     if (topic === "orders/create") {
-        const order = req.body;
-        const customerName = order.customer ? `${order.customer.first_name} ${order.customer.last_name || ""}`.trim() : 'Unknown';
-
         // 1. Create the Activity Log as 'pending'
         const activity = await ActivityLog.create({
             merchant: merchant?._id,
@@ -98,18 +95,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         // Processing continues in the background
         (async () => {
             try {
-                // 2. Format the phone number correctly
-                let rawPhone = order.customer?.phone || order.shipping_address?.phone || order.billing_address?.phone;
-                if (!rawPhone) throw new Error("No phone number found in order");
-
-                let phone = rawPhone.replace(/\D/g, '');
-                if (phone && !phone.startsWith('92')) {
-                    phone = '92' + phone;
-                }
-
-                const orderNumber = order.name || order.order_number || `#${order.id}`;
-
-                // Trigger 1: Admin Alert
+                // Trigger 1: Admin Alert (Runs independently of customer phone)
                 const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
                 if (adminSetting?.enabled && merchant.adminPhoneNumber) {
                     const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
@@ -123,11 +109,21 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 // Trigger 2: Customer Confirmation
                 const customerSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
                 if (customerSetting?.enabled) {
+                    if (!customerPhoneFormatted) {
+                        // If no phone, we update log and finish (don't throw error to catch-all)
+                        if (activity) {
+                            activity.type = 'failed';
+                            activity.message = 'Skipped: No phone number found 📵';
+                            await activity.save();
+                        }
+                        return;
+                    }
+
                     const customerTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/create" });
                     let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
                     customerMsg = customerMsg.replace(/{{customer_name}}/g, customerName).replace(/{{order_number}}/g, orderNumber);
 
-                    const result = await whatsappService.sendMessage(shopDomain, phone, customerMsg);
+                    const result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, customerMsg);
 
                     if (result.success) {
                         await automationService.trackSent(shopDomain, "order-confirmation");
@@ -140,6 +136,11 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     } else {
                         throw new Error(result.error || "Failed to send WhatsApp message");
                     }
+                } else if (activity) {
+                    // If customer setting disabled but admin alert was sent, mark as confirmed/processed
+                    activity.type = 'confirmed';
+                    activity.message = 'Admin Alert Sent (Customer Disabled) ✅';
+                    await activity.save();
                 }
             } catch (err) {
                 // 5. UPDATE DASHBOARD TO RED (FAILED)
@@ -152,18 +153,18 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 }
             }
         })();
-        return; // Important: already sent response
+        return;
     } else if (topic === "orders/cancelled") {
         await logEvent("cancelled", req, shopDomain);
 
         const cancelSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
-        if (cancelSetting?.enabled && customerPhone) {
+        if (cancelSetting?.enabled && customerPhoneFormatted) {
             const cancelTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/cancelled" });
             if (cancelTemplate) {
                 let cancelMsg = cancelTemplate.message;
                 cancelMsg = cancelMsg.replace(/{{customer_name}}/g, customerName).replace(/{{order_number}}/g, orderNumber);
 
-                await whatsappService.sendMessage(shopDomain, customerPhone, cancelMsg);
+                await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
             }
         }
     } else if (topic === "checkouts/abandoned") {
