@@ -188,6 +188,8 @@ class WhatsAppService {
                     }
                 }
             });
+
+            return { success: true, status: "initializing" };
         } catch (error) {
             console.error(`Error initializing Baileys for ${shopDomain}:`, error);
             return { success: false, error: error.message };
