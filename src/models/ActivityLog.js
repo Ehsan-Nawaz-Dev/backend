@@ -10,6 +10,7 @@ const ActivityLogSchema = new mongoose.Schema(
     },
     orderId: { type: String },
     customerName: { type: String },
+    customerPhone: { type: String },
     message: { type: String },
     errorMessage: { type: String },
     channel: { type: String, default: "whatsapp" },

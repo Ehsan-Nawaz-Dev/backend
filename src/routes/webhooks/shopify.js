@@ -5,9 +5,28 @@ import { Merchant } from "../../models/Merchant.js";
 import { AutomationSetting } from "../../models/AutomationSetting.js";
 import { whatsappService } from "../../services/whatsappService.js";
 import { Template } from "../../models/Template.js";
+import { shopifyService } from "../../services/shopifyService.js";
 import crypto from "crypto";
 
 const router = Router();
+
+// Bulletproof Phone & Name extraction
+const getCustomerData = (order) => {
+    // Try these 3 places for phone
+    const phone = order.customer?.phone ||
+        order.shipping_address?.phone ||
+        order.billing_address?.phone ||
+        order.phone;
+
+    // Try these 2 places for name
+    const first = order.customer?.first_name || order.shipping_address?.first_name || "Customer";
+    const last = order.customer?.last_name || "";
+
+    return {
+        phone: phone ? phone.replace(/\D/g, '') : null,
+        name: `${first} ${last}`.trim()
+    };
+};
 
 // Middleware to verify Shopify Webhook HMAC
 const verifyShopifyWebhook = (req, res, next) => {
@@ -37,11 +56,13 @@ const verifyShopifyWebhook = (req, res, next) => {
 const logEvent = async (type, req, shopDomain) => {
     try {
         const merchant = await Merchant.findOne({ shopDomain });
+        const { phone: customerPhone, name: customerName } = getCustomerData(req.body);
         return await ActivityLog.create({
             merchant: merchant?._id,
             type,
             orderId: req.body?.id?.toString?.() || req.body?.order_id?.toString?.(),
-            customerName: req.body?.customer?.first_name || req.body?.shipping_address?.first_name || "Customer",
+            customerName,
+            customerPhone,
             message: `Shopify webhook: ${type}`,
             rawPayload: req.body,
         });
@@ -69,12 +90,11 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     }
 
     const order = req.body;
+    const { phone: customerPhoneRaw, name: customerName } = getCustomerData(order);
     const orderNumber = order.name || order.order_number || `#${order.id}`;
-    const customerName = order.customer ? `${order.customer.first_name} ${order.customer.last_name || ""}`.trim() : "Customer";
 
-    // Format the Customer Phone (Robust Extraction)
-    let rawPhone = order.phone || order.customer?.phone || order.shipping_address?.phone || order.billing_address?.phone || order.customer?.default_address?.phone || "";
-    let customerPhoneFormatted = rawPhone.toString().replace(/\D/g, '');
+    // Format the Customer Phone (Ensure country code)
+    let customerPhoneFormatted = customerPhoneRaw;
     if (customerPhoneFormatted && !customerPhoneFormatted.startsWith('92')) {
         customerPhoneFormatted = '92' + customerPhoneFormatted;
     }
@@ -87,6 +107,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             orderId: order.id?.toString(),
             message: 'Processing Order Notification...',
             customerName: customerName,
+            customerPhone: customerPhoneFormatted,
             rawPayload: order
         });
 
@@ -127,6 +148,10 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
                     if (result.success) {
                         await automationService.trackSent(shopDomain, "order-confirmation");
+
+                        // ADD SHOPIFY TAG: "WhatsApp Sent"
+                        await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, order.id, "WhatsApp Sent");
+
                         // 4. UPDATE DASHBOARD TO GREEN (CONFIRMED)
                         if (activity) {
                             activity.type = 'confirmed';

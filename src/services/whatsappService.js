@@ -128,9 +128,66 @@ class WhatsAppService {
 
             sock.ev.on("creds.update", saveCreds);
 
+            sock.ev.on("messages.upsert", async (m) => {
+                if (m.type !== "notify") return;
 
+                for (const msg of m.messages) {
+                    if (!msg.message || msg.key.fromMe) continue;
 
-            return { success: true, status: "initializing" };
+                    const from = msg.key.remoteJid.split("@")[0];
+                    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+
+                    console.log(`Incoming message from ${from} (${shopDomain}): ${text}`);
+
+                    // Basic Keyword Detection for Confirm/Reject
+                    const input = text.toLowerCase().trim();
+                    let tagToAdd = null;
+                    let activityStatus = null;
+
+                    if (input.includes("confirm") || input.includes("yes") || input.includes("theek")) {
+                        tagToAdd = "Order Confirmed";
+                        activityStatus = "confirmed";
+                    } else if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi")) {
+                        tagToAdd = "Order Rejected";
+                        activityStatus = "rejected";
+                    }
+
+                    if (tagToAdd) {
+                        try {
+                            // 1. Find the Merchant to get Shopify Token
+                            const { Merchant } = await import("../models/Merchant.js");
+                            const { ActivityLog } = await import("../models/ActivityLog.js");
+                            const { shopifyService } = await import("./shopifyService.js");
+
+                            const merchant = await Merchant.findOne({ shopDomain });
+                            if (!merchant || !merchant.shopifyAccessToken) continue;
+
+                            // 2. Find the most recent ActivityLog for this phone number to get orderId
+                            // Note: we look for recent 'confirmed' logs (meaning we sent a message to them)
+                            const log = await ActivityLog.findOne({
+                                merchant: merchant._id,
+                                customerPhone: new RegExp(from.slice(-10)), // Match last 10 digits to be safe with prefixes
+                                type: "confirmed"
+                            }).sort({ createdAt: -1 });
+
+                            if (log && log.orderId) {
+                                console.log(`Linking reply from ${from} to Shopify Order ${log.orderId}`);
+                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd);
+
+                                // Optional: Update activity message
+                                log.message = `Customer replied: ${tagToAdd} 💬`;
+                                if (activityStatus === "rejected") log.type = "failed"; // Visual feedback
+                                await log.save();
+
+                                // Auto-reply (Optional but good UX)
+                                await this.sendMessage(shopDomain, from, `Thank you! Your order has been marked as: ${tagToAdd}.`);
+                            }
+                        } catch (err) {
+                            console.error(`Error processing WhatsApp reply from ${from}:`, err);
+                        }
+                    }
+                }
+            });
         } catch (error) {
             console.error(`Error initializing Baileys for ${shopDomain}:`, error);
             return { success: false, error: error.message };
