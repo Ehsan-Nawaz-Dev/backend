@@ -1,7 +1,7 @@
 import { Router } from "express";
 import settingsRouter from "./settings.js";
 import templatesRouter from "./templates.js";
-import shopifyWebhooksRouter from "./webhooks-shopify.js";
+import shopifyWebhooksRouter from "./webhooks/shopify.js";
 import whatsappWebhooksRouter from "./webhooks-whatsapp.js";
 import activityRouter from "./activity.js";
 import contactRouter from "./contact.js";
