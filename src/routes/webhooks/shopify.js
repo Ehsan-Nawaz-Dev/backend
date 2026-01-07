@@ -80,53 +80,79 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     }
 
     if (topic === "orders/create") {
-        const activity = await logEvent("pending", req, shopDomain);
+        const order = req.body;
+        const customerName = order.customer ? `${order.customer.first_name} ${order.customer.last_name || ""}`.trim() : 'Unknown';
 
-        // Trigger 1: Admin Alert
-        const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
-        if (adminSetting?.enabled && merchant.adminPhoneNumber) {
-            const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
-            let adminMsg = adminTemplate?.message || `New Order Alert: Order {{order_number}} received from {{customer_name}}`;
-            adminMsg = adminMsg.replace(/{{customer_name}}/g, customerName).replace(/{{order_number}}/g, orderNumber);
+        // 1. Create the Activity Log as 'pending'
+        const activity = await ActivityLog.create({
+            merchant: merchant?._id,
+            type: 'pending',
+            orderId: order.id?.toString(),
+            message: 'Processing Order Notification...',
+            customerName: customerName,
+            rawPayload: order
+        });
 
-            await whatsappService.sendMessage(shopDomain, merchant.adminPhoneNumber, adminMsg);
-            await automationService.trackSent(shopDomain, "admin-order-alert");
-        }
+        res.status(200).send('ok'); // Tell Shopify we got it
 
-        // Trigger 2: Customer Confirmation
-        const customerSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
-        if (customerSetting?.enabled && customerPhone) {
-            const customerTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/create" });
-            let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
-            customerMsg = customerMsg.replace(/{{customer_name}}/g, customerName).replace(/{{order_number}}/g, orderNumber);
-
+        // Processing continues in the background
+        (async () => {
             try {
-                // Send via Baileys (sock.sendMessage)
-                const result = await whatsappService.sendMessage(shopDomain, customerPhone, customerMsg);
+                // 2. Format the phone number correctly
+                let rawPhone = order.customer?.phone || order.shipping_address?.phone || order.billing_address?.phone;
+                if (!rawPhone) throw new Error("No phone number found in order");
 
-                if (result.success) {
-                    await automationService.trackSent(shopDomain, "order-confirmation");
-
-                    // UPDATE THE LOG (Crucial)
-                    if (activity) {
-                        activity.type = 'confirmed';
-                        activity.message = 'Order Confirmation Sent';
-                        activity.customerName = customerName;
-                        await activity.save();
-                    }
-                } else {
-                    throw new Error(result.error || "Failed to send message via WhatsApp");
+                let phone = rawPhone.replace(/\D/g, '');
+                if (phone && !phone.startsWith('92')) {
+                    phone = '92' + phone;
                 }
-            } catch (error) {
-                console.error(`WhatsApp Confirmation Error for ${shopDomain}:`, error);
+
+                const orderNumber = order.name || order.order_number || `#${order.id}`;
+
+                // Trigger 1: Admin Alert
+                const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
+                if (adminSetting?.enabled && merchant.adminPhoneNumber) {
+                    const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
+                    let adminMsg = adminTemplate?.message || `New Order Alert: Order {{order_number}} received from {{customer_name}}`;
+                    adminMsg = adminMsg.replace(/{{customer_name}}/g, customerName).replace(/{{order_number}}/g, orderNumber);
+
+                    await whatsappService.sendMessage(shopDomain, merchant.adminPhoneNumber, adminMsg);
+                    await automationService.trackSent(shopDomain, "admin-order-alert");
+                }
+
+                // Trigger 2: Customer Confirmation
+                const customerSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
+                if (customerSetting?.enabled) {
+                    const customerTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/create" });
+                    let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
+                    customerMsg = customerMsg.replace(/{{customer_name}}/g, customerName).replace(/{{order_number}}/g, orderNumber);
+
+                    const result = await whatsappService.sendMessage(shopDomain, phone, customerMsg);
+
+                    if (result.success) {
+                        await automationService.trackSent(shopDomain, "order-confirmation");
+                        // 4. UPDATE DASHBOARD TO GREEN (CONFIRMED)
+                        if (activity) {
+                            activity.type = 'confirmed';
+                            activity.message = 'WhatsApp Confirmation Sent ✅';
+                            await activity.save();
+                        }
+                    } else {
+                        throw new Error(result.error || "Failed to send WhatsApp message");
+                    }
+                }
+            } catch (err) {
+                // 5. UPDATE DASHBOARD TO RED (FAILED)
+                console.error(`Webhook Background Error for ${shopDomain}:`, err);
                 if (activity) {
-                    activity.type = 'cancelled';
-                    activity.message = `Error: ${error.message}`;
-                    activity.customerName = customerName;
+                    activity.type = 'failed';
+                    activity.message = 'Failed to send WhatsApp ❌';
+                    activity.errorMessage = err.message;
                     await activity.save();
                 }
             }
-        }
+        })();
+        return; // Important: already sent response
     } else if (topic === "orders/cancelled") {
         await logEvent("cancelled", req, shopDomain);
 
