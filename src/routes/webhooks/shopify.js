@@ -34,13 +34,14 @@ const verifyShopifyWebhook = (req, res, next) => {
     }
 };
 
-const logEvent = async (type, req) => {
+const logEvent = async (type, req, shopDomain) => {
     try {
-        await ActivityLog.create({
-            merchant: null,
+        const merchant = await Merchant.findOne({ shopDomain });
+        return await ActivityLog.create({
+            merchant: merchant?._id,
             type,
             orderId: req.body?.id?.toString?.() || req.body?.order_id?.toString?.(),
-            customerName: req.body?.customer?.first_name || req.body?.shipping_address?.first_name,
+            customerName: req.body?.customer?.first_name || req.body?.shipping_address?.first_name || "Customer",
             message: `Shopify webhook: ${type}`,
             rawPayload: req.body,
         });
@@ -72,7 +73,12 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     const customerPhone = req.body?.customer?.phone || req.body?.shipping_address?.phone || req.body?.billing_address?.phone;
 
     if (topic === "orders/create") {
-        await logEvent("pending", req);
+        const activity = await logEvent("pending", req, shopDomain);
+
+        const order = req.body;
+        const customerName = order.customer?.first_name || "Customer";
+        const customerPhone = order.customer?.phone || order.shipping_address?.phone;
+        const orderNumber = order.name || order.order_number || `#${order.id}`;
 
         // Trigger 1: Admin Alert
         const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
@@ -95,10 +101,18 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             const result = await whatsappService.sendMessage(shopDomain, customerPhone, customerMsg);
             if (result.success) {
                 await automationService.trackSent(shopDomain, "order-confirmation");
+
+                // Update Dashboard: Activity Log
+                if (activity) {
+                    activity.type = "confirmed";
+                    activity.customerName = customerName;
+                    activity.message = "Order confirmation sent";
+                    await activity.save();
+                }
             }
         }
     } else if (topic === "orders/cancelled") {
-        await logEvent("cancelled", req);
+        await logEvent("cancelled", req, shopDomain);
 
         const cancelSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
         if (cancelSetting?.enabled && customerPhone) {
@@ -111,10 +125,10 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             }
         }
     } else if (topic === "checkouts/abandoned") {
-        await logEvent("pending", req);
+        await logEvent("pending", req, shopDomain);
         await automationService.trackSent(shopDomain, "abandoned_cart");
     } else if (topic === "fulfillments/update") {
-        await logEvent("confirmed", req);
+        await logEvent("confirmed", req, shopDomain);
         await automationService.trackSent(shopDomain, "fulfillment_update");
     } else if (topic === "orders/paid") {
         const revenue = parseFloat(req.body?.total_price || 0);
