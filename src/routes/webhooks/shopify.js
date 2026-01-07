@@ -68,17 +68,19 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         return res.status(200).send("ok");
     }
 
-    const orderNumber = req.body?.name || req.body?.order_number || `#${req.body?.id}`;
-    const customerName = req.body?.customer?.first_name || req.body?.shipping_address?.first_name || "Customer";
-    const customerPhone = req.body?.customer?.phone || req.body?.shipping_address?.phone || req.body?.billing_address?.phone;
+    const order = req.body;
+    const orderNumber = order.name || order.order_number || `#${order.id}`;
+    const customerName = order.customer?.first_name || order.shipping_address?.first_name || "Customer";
+
+    // Format the Customer Phone
+    let customerPhone = order.customer?.phone || order.shipping_address?.phone || order.billing_address?.phone || "";
+    customerPhone = customerPhone.replace(/\D/g, ''); // Remove non-digits
+    if (customerPhone && !customerPhone.startsWith('92')) {
+        customerPhone = '92' + customerPhone; // Ensure country code (Pakistan)
+    }
 
     if (topic === "orders/create") {
         const activity = await logEvent("pending", req, shopDomain);
-
-        const order = req.body;
-        const customerName = order.customer?.first_name || "Customer";
-        const customerPhone = order.customer?.phone || order.shipping_address?.phone;
-        const orderNumber = order.name || order.order_number || `#${order.id}`;
 
         // Trigger 1: Admin Alert
         const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
@@ -98,15 +100,29 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
             customerMsg = customerMsg.replace(/{{customer_name}}/g, customerName).replace(/{{order_number}}/g, orderNumber);
 
-            const result = await whatsappService.sendMessage(shopDomain, customerPhone, customerMsg);
-            if (result.success) {
-                await automationService.trackSent(shopDomain, "order-confirmation");
+            try {
+                // Send via Baileys (sock.sendMessage)
+                const result = await whatsappService.sendMessage(shopDomain, customerPhone, customerMsg);
 
-                // Update Dashboard: Activity Log
+                if (result.success) {
+                    await automationService.trackSent(shopDomain, "order-confirmation");
+
+                    // UPDATE THE LOG (Crucial)
+                    if (activity) {
+                        activity.type = 'confirmed';
+                        activity.message = 'Order Confirmation Sent';
+                        activity.customerName = customerName;
+                        await activity.save();
+                    }
+                } else {
+                    throw new Error(result.error || "Failed to send message via WhatsApp");
+                }
+            } catch (error) {
+                console.error(`WhatsApp Confirmation Error for ${shopDomain}:`, error);
                 if (activity) {
-                    activity.type = "confirmed";
+                    activity.type = 'cancelled';
+                    activity.message = `Error: ${error.message}`;
                     activity.customerName = customerName;
-                    activity.message = "Order confirmation sent";
                     await activity.save();
                 }
             }
