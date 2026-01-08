@@ -46,6 +46,22 @@ class ShopifyService {
             return { success: false, error: error.message };
         }
     }
+
+    /**
+     * Fetches order details from Shopify.
+     */
+    async getOrder(shopDomain, accessToken, orderId) {
+        try {
+            const url = `https://${shopDomain}/admin/api/2023-10/orders/${orderId}.json`;
+            const response = await axios.get(url, {
+                headers: { "X-Shopify-Access-Token": accessToken }
+            });
+            return response.data.order;
+        } catch (error) {
+            console.error(`Error fetching Shopify order ${orderId}:`, error.message);
+            return null;
+        }
+    }
 }
 
 export const shopifyService = new ShopifyService();

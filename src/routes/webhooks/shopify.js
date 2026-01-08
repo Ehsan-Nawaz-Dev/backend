@@ -117,36 +117,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         // Processing continues in the background
         (async () => {
             try {
-                // Trigger 1: Admin Alert (Runs independently of customer phone)
-                const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
-                // Refetch merchant to get latest credentials
-                const currentMerchant = await Merchant.findOne({ shopDomain });
-                if (!currentMerchant) return;
-
-                if (adminSetting?.enabled && currentMerchant.adminPhoneNumber) {
-                    const adminTemplate = await Template.findOne({ merchant: currentMerchant._id, event: "admin-order-alert" });
-                    let adminMsg = adminTemplate?.message || `New Order Alert: Order {{order_number}} received from {{customer_name}}`;
-
-                    // Replace Placeholders
-                    adminMsg = replacePlaceholders(adminMsg, { order, merchant: currentMerchant });
-                    // Legacy support for {{customer_name}} if not in helper
-                    adminMsg = adminMsg.replace(/{{customer_name}}/g, customerName);
-
-                    if (adminTemplate?.isPoll && adminTemplate?.pollOptions?.length > 0) {
-                        await whatsappService.sendPoll(shopDomain, currentMerchant.adminPhoneNumber, adminMsg, adminTemplate.pollOptions);
-                    } else {
-                        await whatsappService.sendMessage(shopDomain, currentMerchant.adminPhoneNumber, adminMsg);
-                    }
-
-                    await automationService.trackSent(shopDomain, "admin-order-alert");
-
-                    // User requested a sequence: Wait ~1 minute before the next message
-                    const delayMs = Math.floor(Math.random() * (70000 - 55000 + 1)) + 55000; // ~1 minute with jitter
-                    console.log(`Order ${order.id}: Waiting ${Math.round(delayMs / 1000)}s before customer confirmation...`);
-                    await whatsappService.constructor.delay(delayMs);
-                }
-
-                // Trigger 2: Customer Confirmation
+                // Trigger 1: Customer Confirmation (Customer is notified FIRST)
                 const customerSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
                 if (customerSetting?.enabled) {
                     if (!customerPhoneFormatted) {

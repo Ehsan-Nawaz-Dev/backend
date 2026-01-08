@@ -147,6 +147,29 @@ class WhatsAppService {
                                 // If they select 'Yes', use orderConfirmReply.
                                 const replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
                                 await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, merchant.orderConfirmTag || "Order Confirmed");
+
+                                // TRIGGER ADMIN ALERT
+                                try {
+                                    const { AutomationSetting } = await import("../models/AutomationSetting.js");
+                                    const { Template } = await import("../models/Template.js");
+                                    const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
+                                    if (adminSetting?.enabled && merchant.adminPhoneNumber) {
+                                        const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
+                                        if (adminTemplate) {
+                                            const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
+                                            if (orderData) {
+                                                const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
+                                                const { automationService } = await import("./automationService.js");
+                                                let adminMsg = replacePlaceholders(adminTemplate.message, { order: orderData, merchant });
+                                                await this.sendMessage(shopDomain, merchant.adminPhoneNumber, adminMsg);
+                                                await automationService.trackSent(shopDomain, "admin-order-alert");
+                                            }
+                                        }
+                                    }
+                                } catch (adminErr) {
+                                    console.error("Error triggering admin alert from poll vote:", adminErr);
+                                }
+
                                 await this.sendMessage(shopDomain, from, replyText);
 
                                 log.message = `Customer voted on poll 📊`;
@@ -195,7 +218,31 @@ class WhatsAppService {
                                 if (activityStatus === "rejected") log.type = "failed";
                                 await log.save();
 
-                                // Use Configured Replies
+                                // TRIGGER ADMIN ALERT (ONLY IF CONFIRMED)
+                                if (activityStatus === "confirmed") {
+                                    try {
+                                        const { AutomationSetting } = await import("../models/AutomationSetting.js");
+                                        const { Template } = await import("../models/Template.js");
+                                        const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
+                                        if (adminSetting?.enabled && merchant.adminPhoneNumber) {
+                                            const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
+                                            if (adminTemplate) {
+                                                const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
+                                                if (orderData) {
+                                                    const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
+                                                    const { automationService } = await import("./automationService.js");
+                                                    let adminMsg = replacePlaceholders(adminTemplate.message, { order: orderData, merchant });
+                                                    await this.sendMessage(shopDomain, merchant.adminPhoneNumber, adminMsg);
+                                                    await automationService.trackSent(shopDomain, "admin-order-alert");
+                                                }
+                                            }
+                                        }
+                                    } catch (adminErr) {
+                                        console.error("Error triggering admin alert from keyword:", adminErr);
+                                    }
+                                }
+
+                                // Use Configured Replies (SEND TO CUSTOMER LAST)
                                 let replyText = "";
                                 if (activityStatus === "confirmed") {
                                     replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";

@@ -32,21 +32,49 @@ router.post("/", async (req, res) => {
           tagToAdd = merchant.orderCancelTag || "Order Cancelled";
         }
 
-        if (replyText) {
-          await whatsappService.sendMessage(shop, customerPhone, replyText);
-
-          // Also handle Shopify tagging if we can find the order
+        if (tagToAdd) {
+          // 1. Tag in Shopify
           const log = await ActivityLog.findOne({
             merchant: merchant._id,
             customerPhone: new RegExp(customerPhone.slice(-10)),
             type: "confirmed"
           }).sort({ createdAt: -1 });
 
-          if (log && log.orderId && tagToAdd) {
+          if (log && log.orderId) {
             await shopifyService.addOrderTag(shop, merchant.shopifyAccessToken, log.orderId, tagToAdd);
+
+            // 2. TRIGGER ADMIN ALERT (ONLY IF CONFIRMED)
+            if (selectedOption === "✅Yes, Confirm✅") {
+              try {
+                const { AutomationSetting } = await import("../models/AutomationSetting.js");
+                const { Template } = await import("../models/Template.js");
+                const adminSetting = await AutomationSetting.findOne({ shopDomain: merchant.shopDomain, type: "admin-order-alert" });
+
+                if (adminSetting?.enabled && merchant.adminPhoneNumber) {
+                  const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
+                  if (adminTemplate) {
+                    const orderData = await shopifyService.getOrder(merchant.shopDomain, merchant.shopifyAccessToken, log.orderId);
+                    if (orderData) {
+                      const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
+                      const { automationService } = await import("../services/automationService.js");
+                      let adminMsg = replacePlaceholders(adminTemplate.message, { order: orderData, merchant });
+                      await whatsappService.sendMessage(shop, merchant.adminPhoneNumber, adminMsg);
+                      await automationService.trackSent(merchant.shopDomain, "admin-order-alert");
+                    }
+                  }
+                }
+              } catch (adminErr) {
+                console.error("Error triggering admin alert from webhook:", adminErr);
+              }
+            }
+
             log.message = `Customer voted ${selectedOption} 📊`;
             await log.save();
           }
+        }
+
+        if (replyText) {
+          await whatsappService.sendMessage(shop, customerPhone, replyText);
         }
       }
     }
