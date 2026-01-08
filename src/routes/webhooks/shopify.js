@@ -139,7 +139,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     // User requested a sequence: Wait ~1 minute before the next message
                     const delayMs = Math.floor(Math.random() * (70000 - 55000 + 1)) + 55000; // ~1 minute with jitter
                     console.log(`Order ${order.id}: Waiting ${Math.round(delayMs / 1000)}s before customer confirmation...`);
-                    await (whatsappService.constructor.delay || (ms => new Promise(r => setTimeout(r, ms))))(delayMs);
+                    await whatsappService.constructor.delay(delayMs);
                 }
 
                 // Trigger 2: Customer Confirmation
@@ -149,8 +149,8 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                         // If no phone, we update log and finish (don't throw error to catch-all)
                         if (activity) {
                             activity.type = 'failed';
-                            activity.message = 'Skipped: No phone number found 1',
-                                await activity.save();
+                            activity.message = 'Skipped: No phone number found 📵';
+                            await activity.save();
                         }
                         return;
                     }
