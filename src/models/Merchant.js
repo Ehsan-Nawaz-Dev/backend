@@ -10,6 +10,7 @@ const MerchantSchema = new mongoose.Schema(
     language: { type: String },
     orderConfirmTag: { type: String, default: "Confirmed" },
     orderCancelTag: { type: String, default: "Cancelled" },
+    pendingConfirmTag: { type: String, default: "Pending Confirmation" },
     // OAuth / tokens for Shopify & WhatsApp providers (to be filled later)
     shopifyAccessToken: { type: String },
     whatsappProvider: { type: String, enum: ["twilio", "cloud", "device"], default: "device" },

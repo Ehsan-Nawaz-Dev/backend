@@ -37,6 +37,7 @@ router.put("/", async (req, res) => {
       language: req.body.language,
       orderConfirmTag: req.body.orderConfirmTag,
       orderCancelTag: req.body.orderCancelTag,
+      pendingConfirmTag: req.body.pendingConfirmTag,
     };
 
     // Simple sanitization: if it exists, ensure it doesn't have leading zeros and handle plus

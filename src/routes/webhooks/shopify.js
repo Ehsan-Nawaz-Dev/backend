@@ -119,19 +119,23 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             try {
                 // Trigger 1: Admin Alert (Runs independently of customer phone)
                 const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
-                if (adminSetting?.enabled && merchant.adminPhoneNumber) {
-                    const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
+                // Refetch merchant to get latest credentials
+                const currentMerchant = await Merchant.findOne({ shopDomain });
+                if (!currentMerchant) return;
+
+                if (adminSetting?.enabled && currentMerchant.adminPhoneNumber) {
+                    const adminTemplate = await Template.findOne({ merchant: currentMerchant._id, event: "admin-order-alert" });
                     let adminMsg = adminTemplate?.message || `New Order Alert: Order {{order_number}} received from {{customer_name}}`;
 
                     // Replace Placeholders
-                    adminMsg = replacePlaceholders(adminMsg, { order, merchant });
+                    adminMsg = replacePlaceholders(adminMsg, { order, merchant: currentMerchant });
                     // Legacy support for {{customer_name}} if not in helper
                     adminMsg = adminMsg.replace(/{{customer_name}}/g, customerName);
 
                     if (adminTemplate?.isPoll && adminTemplate?.pollOptions?.length > 0) {
-                        await whatsappService.sendPoll(shopDomain, merchant.adminPhoneNumber, adminMsg, adminTemplate.pollOptions);
+                        await whatsappService.sendPoll(shopDomain, currentMerchant.adminPhoneNumber, adminMsg, adminTemplate.pollOptions);
                     } else {
-                        await whatsappService.sendMessage(shopDomain, merchant.adminPhoneNumber, adminMsg);
+                        await whatsappService.sendMessage(shopDomain, currentMerchant.adminPhoneNumber, adminMsg);
                     }
 
                     await automationService.trackSent(shopDomain, "admin-order-alert");
@@ -155,11 +159,13 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                         return;
                     }
 
-                    const customerTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/create" });
+                    // Refetch again after potential delay for the most up-to-date token
+                    const updatedMerchant = await Merchant.findOne({ shopDomain });
+                    const customerTemplate = await Template.findOne({ merchant: updatedMerchant?._id, event: "orders/create" });
                     let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
 
                     // Replace Placeholders
-                    customerMsg = replacePlaceholders(customerMsg, { order, merchant });
+                    customerMsg = replacePlaceholders(customerMsg, { order, merchant: updatedMerchant });
                     customerMsg = customerMsg.replace(/{{customer_name}}/g, customerName);
 
                     let result;
@@ -172,8 +178,13 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     if (result.success) {
                         await automationService.trackSent(shopDomain, "order-confirmation");
 
-                        // ADD SHOPIFY TAG: "WhatsApp Sent"
-                        await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, order.id, "WhatsApp Sent");
+                        // ADD SHOPIFY TAGS
+                        if (updatedMerchant?.shopifyAccessToken) {
+                            await shopifyService.addOrderTag(shopDomain, updatedMerchant.shopifyAccessToken, order.id, "WhatsApp Sent");
+                            if (updatedMerchant.pendingConfirmTag) {
+                                await shopifyService.addOrderTag(shopDomain, updatedMerchant.shopifyAccessToken, order.id, updatedMerchant.pendingConfirmTag);
+                            }
+                        }
 
                         // 4. UPDATE DASHBOARD TO GREEN (CONFIRMED)
                         if (activity) {
