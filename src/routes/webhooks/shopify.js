@@ -117,7 +117,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         // Processing continues in the background
         (async () => {
             try {
-                // Trigger 1: Customer Confirmation (Customer is notified FIRST)
+                // Trigger 1: Customer Confirmation (Customer is notified IMMEDIATELY)
                 const customerSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
                 if (customerSetting?.enabled) {
                     if (!customerPhoneFormatted) {

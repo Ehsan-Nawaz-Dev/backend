@@ -45,6 +45,9 @@ router.post("/", async (req, res) => {
 
             // 2. TRIGGER ADMIN ALERT (ONLY IF CONFIRMED)
             if (selectedOption === "✅Yes, Confirm✅") {
+              // Wait 60s before Admin Alert
+              await (await import("../services/whatsappService.js")).whatsappService.constructor.delay(60000);
+
               try {
                 const { AutomationSetting } = await import("../models/AutomationSetting.js");
                 const { Template } = await import("../models/Template.js");
@@ -66,6 +69,10 @@ router.post("/", async (req, res) => {
               } catch (adminErr) {
                 console.error("Error triggering admin alert from webhook:", adminErr);
               }
+
+              // Total 80-100s randomized delay
+              const finalDelay = Math.floor(Math.random() * (40000 - 20000 + 1)) + 20000;
+              await (await import("../services/whatsappService.js")).whatsappService.constructor.delay(finalDelay);
             }
 
             log.message = `Customer voted ${selectedOption} 📊`;
@@ -74,6 +81,8 @@ router.post("/", async (req, res) => {
         }
 
         if (replyText) {
+          // If already waited (confirmed), the delay happened above. 
+          // If cancelled, send immediately or with small delay (user only specified delays for confirmation).
           await whatsappService.sendMessage(shop, customerPhone, replyText);
         }
       }
