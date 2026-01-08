@@ -40,7 +40,12 @@ class CampaignService {
                 // Replace placeholders
                 let personalizedMessage = message.replace(/{{name}}/g, contact.name || "");
 
-                const result = await whatsappService.sendMessage(shopDomain, contact.phone, personalizedMessage);
+                let result;
+                if (campaign.isPoll && campaign.pollOptions?.length > 0) {
+                    result = await whatsappService.sendPoll(shopDomain, contact.phone, personalizedMessage, campaign.pollOptions);
+                } else {
+                    result = await whatsappService.sendMessage(shopDomain, contact.phone, personalizedMessage);
+                }
 
                 if (result.success) {
                     contact.status = "sent";

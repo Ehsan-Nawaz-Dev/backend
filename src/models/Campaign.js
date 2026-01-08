@@ -13,6 +13,8 @@ const CampaignSchema = new mongoose.Schema(
             }
         ],
         message: { type: String, required: true },
+        isPoll: { type: Boolean, default: false },
+        pollOptions: { type: [String], default: [] },
         type: { type: String, default: "text" },
         status: {
             type: String,

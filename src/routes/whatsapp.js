@@ -82,13 +82,18 @@ router.post("/send", async (req, res) => {
         const shopDomain = getShopDomain(req);
         if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
 
-        const { phoneNumber, message } = req.body;
+        const { phoneNumber, message, isPoll, pollOptions } = req.body;
 
         if (!phoneNumber || !message) {
             return res.status(400).json({ error: "Missing phoneNumber or message" });
         }
 
-        const result = await whatsappService.sendMessage(shopDomain, phoneNumber, message);
+        let result;
+        if (isPoll && pollOptions?.length > 0) {
+            result = await whatsappService.sendPoll(shopDomain, phoneNumber, message, pollOptions);
+        } else {
+            result = await whatsappService.sendMessage(shopDomain, phoneNumber, message);
+        }
 
         if (result.success) {
             res.json({
