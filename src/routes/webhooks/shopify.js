@@ -7,6 +7,7 @@ import { whatsappService } from "../../services/whatsappService.js";
 import { Template } from "../../models/Template.js";
 import { shopifyService } from "../../services/shopifyService.js";
 import crypto from "crypto";
+import { replacePlaceholders } from "../../utils/placeholderHelper.js";
 
 const router = Router();
 
@@ -121,10 +122,24 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 if (adminSetting?.enabled && merchant.adminPhoneNumber) {
                     const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
                     let adminMsg = adminTemplate?.message || `New Order Alert: Order {{order_number}} received from {{customer_name}}`;
-                    adminMsg = adminMsg.replace(/{{customer_name}}/g, customerName).replace(/{{order_number}}/g, orderNumber);
 
-                    await whatsappService.sendMessage(shopDomain, merchant.adminPhoneNumber, adminMsg);
+                    // Replace Placeholders
+                    adminMsg = replacePlaceholders(adminMsg, { order, merchant });
+                    // Legacy support for {{customer_name}} if not in helper
+                    adminMsg = adminMsg.replace(/{{customer_name}}/g, customerName);
+
+                    if (adminTemplate?.isPoll && adminTemplate?.pollOptions?.length > 0) {
+                        await whatsappService.sendPoll(shopDomain, merchant.adminPhoneNumber, adminMsg, adminTemplate.pollOptions);
+                    } else {
+                        await whatsappService.sendMessage(shopDomain, merchant.adminPhoneNumber, adminMsg);
+                    }
+
                     await automationService.trackSent(shopDomain, "admin-order-alert");
+
+                    // User requested a sequence: Wait ~1 minute before the next message
+                    const delayMs = Math.floor(Math.random() * (70000 - 55000 + 1)) + 55000; // ~1 minute with jitter
+                    console.log(`Order ${order.id}: Waiting ${Math.round(delayMs / 1000)}s before customer confirmation...`);
+                    await (whatsappService.constructor.delay || (ms => new Promise(r => setTimeout(r, ms))))(delayMs);
                 }
 
                 // Trigger 2: Customer Confirmation
@@ -134,17 +149,25 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                         // If no phone, we update log and finish (don't throw error to catch-all)
                         if (activity) {
                             activity.type = 'failed';
-                            activity.message = 'Skipped: No phone number found 📵';
-                            await activity.save();
+                            activity.message = 'Skipped: No phone number found 1',
+                                await activity.save();
                         }
                         return;
                     }
 
                     const customerTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/create" });
                     let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
-                    customerMsg = customerMsg.replace(/{{customer_name}}/g, customerName).replace(/{{order_number}}/g, orderNumber);
 
-                    const result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, customerMsg);
+                    // Replace Placeholders
+                    customerMsg = replacePlaceholders(customerMsg, { order, merchant });
+                    customerMsg = customerMsg.replace(/{{customer_name}}/g, customerName);
+
+                    let result;
+                    if (customerTemplate?.isPoll && customerTemplate?.pollOptions?.length > 0) {
+                        result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, customerMsg, customerTemplate.pollOptions);
+                    } else {
+                        result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, customerMsg);
+                    }
 
                     if (result.success) {
                         await automationService.trackSent(shopDomain, "order-confirmation");
@@ -187,16 +210,48 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             const cancelTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/cancelled" });
             if (cancelTemplate) {
                 let cancelMsg = cancelTemplate.message;
-                cancelMsg = cancelMsg.replace(/{{customer_name}}/g, customerName).replace(/{{order_number}}/g, orderNumber);
+                cancelMsg = replacePlaceholders(cancelMsg, { order, merchant });
+                cancelMsg = cancelMsg.replace(/{{customer_name}}/g, customerName);
 
-                await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
+                if (cancelTemplate.isPoll && cancelTemplate.pollOptions?.length > 0) {
+                    await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions);
+                } else {
+                    await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
+                }
             }
         }
     } else if (topic === "checkouts/abandoned") {
         await logEvent("pending", req, shopDomain);
+
+        // Abandoned cart often needs a different set of data, but we use the helper for consistency
+        const abandonedTemplate = await Template.findOne({ merchant: merchant._id, event: "checkouts/abandoned" });
+        if (abandonedTemplate && abandonedTemplate.enabled && customerPhoneFormatted) {
+            let abandonedMsg = abandonedTemplate.message;
+            abandonedMsg = replacePlaceholders(abandonedMsg, { order, merchant });
+            abandonedMsg = abandonedMsg.replace(/{{customer_name}}/g, customerName);
+
+            if (abandonedTemplate.isPoll && abandonedTemplate.pollOptions?.length > 0) {
+                await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, abandonedMsg, abandonedTemplate.pollOptions);
+            } else {
+                await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, abandonedMsg);
+            }
+        }
         await automationService.trackSent(shopDomain, "abandoned_cart");
     } else if (topic === "fulfillments/update") {
         await logEvent("confirmed", req, shopDomain);
+
+        const fulfillmentTemplate = await Template.findOne({ merchant: merchant._id, event: "fulfillments/update" });
+        if (fulfillmentTemplate && fulfillmentTemplate.enabled && customerPhoneFormatted) {
+            let fulfillmentMsg = fulfillmentTemplate.message;
+            fulfillmentMsg = replacePlaceholders(fulfillmentMsg, { order, merchant });
+            fulfillmentMsg = fulfillmentMsg.replace(/{{customer_name}}/g, customerName);
+
+            if (fulfillmentTemplate.isPoll && fulfillmentTemplate.pollOptions?.length > 0) {
+                await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, fulfillmentMsg, fulfillmentTemplate.pollOptions);
+            } else {
+                await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, fulfillmentMsg);
+            }
+        }
         await automationService.trackSent(shopDomain, "fulfillment_update");
     } else if (topic === "orders/paid") {
         const revenue = parseFloat(req.body?.total_price || 0);

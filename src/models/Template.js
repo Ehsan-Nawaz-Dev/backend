@@ -17,6 +17,8 @@ const TemplateSchema = new mongoose.Schema(
     },
     message: { type: String, required: true },
     enabled: { type: Boolean, default: true },
+    isPoll: { type: Boolean, default: false },
+    pollOptions: [{ type: String }],
   },
   { timestamps: true },
 );

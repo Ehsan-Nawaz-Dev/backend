@@ -10,39 +10,52 @@ class CampaignService {
         await campaign.save();
 
         const { shopDomain, contacts, message } = campaign;
-        const batchSize = 5;
-        const waitTime = 2000; // 2 seconds
 
-        for (let i = 0; i < contacts.length; i += batchSize) {
-            const batch = contacts.slice(i, i + batchSize);
+        for (let i = 0; i < contacts.length; i++) {
+            const contact = contacts[i];
 
-            const promises = batch.map(async (contact) => {
-                try {
-                    // Replace placeholders
-                    let personalizedMessage = message.replace(/{{name}}/g, contact.name || "");
-
-                    const result = await whatsappService.sendMessage(shopDomain, contact.phone, personalizedMessage);
-
-                    if (result.success) {
-                        contact.status = "sent";
-                        campaign.sentCount += 1;
-                    } else {
-                        contact.status = "failed";
-                        contact.error = result.error;
-                    }
-                } catch (err) {
-                    contact.status = "failed";
-                    contact.error = err.message;
+            // Wait before sending if not the first message
+            if (i > 0) {
+                // Determine base delay: 2nd message ~60s, 3rd message ~90s, then randomized
+                // User requested: 1 min for 2nd, 1.5 min for 3rd, and random [1m, 1.5m]
+                let baseDelay;
+                if (i === 1) {
+                    baseDelay = 60000; // 1 minute for the 2nd message
+                } else if (i === 2) {
+                    baseDelay = 90000; // 1.5 minutes for the 3rd message
+                } else {
+                    // Randomize between 60s and 90s for subsequent messages
+                    baseDelay = Math.floor(Math.random() * (90000 - 60000 + 1)) + 60000;
                 }
-            });
 
-            await Promise.all(promises);
-            await campaign.save();
+                // Add a small random jitter (+/- 5 seconds) to avoid exact timing detection
+                const jitter = (Math.random() * 10000) - 5000;
+                const finalDelay = Math.max(60000, Math.min(90000, baseDelay + jitter));
 
-            // Wait if not the last batch
-            if (i + batchSize < contacts.length) {
-                await new Promise(resolve => setTimeout(resolve, waitTime));
+                console.log(`Campaign ${campaignId}: Waiting ${Math.round(finalDelay / 1000)} seconds before sending to ${contact.phone} (Message ${i + 1}/${contacts.length})`);
+                await WhatsAppService.delay(finalDelay);
             }
+
+            try {
+                // Replace placeholders
+                let personalizedMessage = message.replace(/{{name}}/g, contact.name || "");
+
+                const result = await whatsappService.sendMessage(shopDomain, contact.phone, personalizedMessage);
+
+                if (result.success) {
+                    contact.status = "sent";
+                    campaign.sentCount += 1;
+                } else {
+                    contact.status = "failed";
+                    contact.error = result.error;
+                }
+            } catch (err) {
+                contact.status = "failed";
+                contact.error = err.message;
+            }
+
+            // Save progress after each message send
+            await campaign.save();
         }
 
         campaign.status = "completed";

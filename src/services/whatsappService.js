@@ -21,6 +21,11 @@ class WhatsAppService {
         this.io = null; // Socket.io instance
     }
 
+    // Helper for sleep/delay
+    static delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     setSocketIO(io) {
         this.io = io;
     }
@@ -298,6 +303,25 @@ class WhatsAppService {
             if (!sock || !sock.user) return { success: false, error: "WhatsApp not connected" };
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
             await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, { text: message });
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    }
+
+    async sendPoll(shopDomain, phoneNumber, pollName, pollOptions) {
+        try {
+            const sock = this.sockets.get(shopDomain);
+            if (!sock || !sock.user) return { success: false, error: "WhatsApp not connected" };
+            const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
+
+            await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, {
+                poll: {
+                    name: pollName,
+                    values: pollOptions,
+                    selectableCount: 1
+                }
+            });
             return { success: true };
         } catch (error) {
             return { success: false, error: error.message };
