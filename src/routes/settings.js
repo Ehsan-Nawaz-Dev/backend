@@ -38,6 +38,8 @@ router.put("/", async (req, res) => {
       orderConfirmTag: req.body.orderConfirmTag,
       orderCancelTag: req.body.orderCancelTag,
       pendingConfirmTag: req.body.pendingConfirmTag,
+      orderConfirmReply: req.body.orderConfirmReply,
+      orderCancelReply: req.body.orderCancelReply,
     };
 
     // Simple sanitization: if it exists, ensure it doesn't have leading zeros and handle plus

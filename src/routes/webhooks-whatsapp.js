@@ -8,16 +8,48 @@ router.post("/", async (req, res) => {
   try {
     const payload = req.body;
 
-    await ActivityLog.create({
-      merchant: null, // map from phone number / integration config later
-      type: "pending",
-      orderId: undefined,
-      customerName: payload?.from || payload?.contactName,
-      message: payload?.body || "Incoming WhatsApp message",
-      rawPayload: payload,
-    });
+    // When poll response is received
+    const { pollResponse, shop, customerPhone } = payload;
 
-    // TODO: parse message (e.g. CONFIRM/CANCEL) and update Shopify via Admin API
+    if (pollResponse && pollResponse.selectedOptions && pollResponse.selectedOptions.length > 0) {
+      const { Merchant } = await import("../models/Merchant.js");
+      const { whatsappService } = await import("../services/whatsappService.js");
+      const { ActivityLog } = await import("../models/ActivityLog.js");
+      const { shopifyService } = await import("../services/shopifyService.js");
+
+      const selectedOption = pollResponse.selectedOptions[0];
+      const merchant = await Merchant.findOne({ shopDomain: shop });
+
+      if (merchant) {
+        let replyText = "";
+        let tagToAdd = "";
+
+        if (selectedOption === "✅Yes, Confirm✅") {
+          replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
+          tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+        } else if (selectedOption === "❌No, Cancel❌") {
+          replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
+          tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+        }
+
+        if (replyText) {
+          await whatsappService.sendMessage(shop, customerPhone, replyText);
+
+          // Also handle Shopify tagging if we can find the order
+          const log = await ActivityLog.findOne({
+            merchant: merchant._id,
+            customerPhone: new RegExp(customerPhone.slice(-10)),
+            type: "confirmed"
+          }).sort({ createdAt: -1 });
+
+          if (log && log.orderId && tagToAdd) {
+            await shopifyService.addOrderTag(shop, merchant.shopifyAccessToken, log.orderId, tagToAdd);
+            log.message = `Customer voted ${selectedOption} 📊`;
+            await log.save();
+          }
+        }
+      }
+    }
 
     res.status(200).json({ received: true });
   } catch (err) {

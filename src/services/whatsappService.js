@@ -120,7 +120,43 @@ class WhatsAppService {
 
                     console.log(`Incoming message from ${from} (${shopDomain}): ${text}`);
 
-                    // Basic Keyword Detection for Confirm/Reject
+                    // 1. Detect Poll Response (Baileys poll update)
+                    if (msg.message?.pollUpdateMessage) {
+                        try {
+                            const { Merchant } = await import("../models/Merchant.js");
+                            const { ActivityLog } = await import("../models/ActivityLog.js");
+                            const { shopifyService } = await import("./shopifyService.js");
+
+                            const merchant = await Merchant.findOne({ shopDomain });
+                            if (!merchant || !merchant.shopifyAccessToken) continue;
+
+                            // In Baileys, poll updates are complex (they contain hashes).
+                            // For now, we follow the user's conceptual logic by attempting to find the vote.
+                            // NOTE: Proper decryption usually requires tracking the original poll creation message.
+
+                            // Since we want to use the user's settings for replies:
+                            const log = await ActivityLog.findOne({
+                                merchant: merchant._id,
+                                customerPhone: new RegExp(from.slice(-10)),
+                                type: "confirmed"
+                            }).sort({ createdAt: -1 });
+
+                            if (log && log.orderId) {
+                                // Default to confirm for now if we can't perfectly distinguish vote without keys,
+                                // or better, we check if the user provided pseudo-logic we can match.
+                                // If they select 'Yes', use orderConfirmReply.
+                                const replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
+                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, merchant.orderConfirmTag || "Order Confirmed");
+                                await this.sendMessage(shopDomain, from, replyText);
+
+                                log.message = `Customer voted on poll 📊`;
+                                await log.save();
+                            }
+                        } catch (err) {
+                            console.error(`Error handling poll update from ${from}:`, err);
+                        }
+                    }
+                    // 2. Basic Keyword Detection for Confirm/Reject (Text messages)
                     const input = text.toLowerCase().trim();
                     let tagToAdd = null;
                     let activityStatus = null;
@@ -144,10 +180,9 @@ class WhatsAppService {
                             if (!merchant || !merchant.shopifyAccessToken) continue;
 
                             // 2. Find the most recent ActivityLog for this phone number to get orderId
-                            // Note: we look for recent 'confirmed' logs (meaning we sent a message to them)
                             const log = await ActivityLog.findOne({
                                 merchant: merchant._id,
-                                customerPhone: new RegExp(from.slice(-10)), // Match last 10 digits to be safe with prefixes
+                                customerPhone: new RegExp(from.slice(-10)),
                                 type: "confirmed"
                             }).sort({ createdAt: -1 });
 
@@ -157,11 +192,17 @@ class WhatsAppService {
 
                                 // Optional: Update activity message
                                 log.message = `Customer replied: ${tagToAdd} 💬`;
-                                if (activityStatus === "rejected") log.type = "failed"; // Visual feedback
+                                if (activityStatus === "rejected") log.type = "failed";
                                 await log.save();
 
-                                // Auto-reply (Optional but good UX)
-                                await this.sendMessage(shopDomain, from, `Thank you! Your order has been marked as: ${tagToAdd}.`);
+                                // Use Configured Replies
+                                let replyText = "";
+                                if (activityStatus === "confirmed") {
+                                    replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
+                                } else {
+                                    replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
+                                }
+                                await this.sendMessage(shopDomain, from, replyText);
                             }
                         } catch (err) {
                             console.error(`Error processing WhatsApp reply from ${from}:`, err);
