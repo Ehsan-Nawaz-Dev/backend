@@ -173,10 +173,8 @@ class WhatsAppService {
                                     console.error("Error triggering admin alert from poll vote:", adminErr);
                                 }
 
-                                // 2. Randomized Delay for Customer Reply (Total 80-100s)
-                                // We already waited 60s, so add 20-40s more.
-                                const finalDelay = Math.floor(Math.random() * (40000 - 20000 + 1)) + 20000;
-                                await WhatsAppService.delay(finalDelay);
+                                // 2. Delay 80s for Customer Reply (As requested: 80s after admin)
+                                await WhatsAppService.delay(80000);
                                 await this.sendMessage(shopDomain, from, replyText);
 
                                 log.message = `Customer voted on poll 📊`;
@@ -251,10 +249,8 @@ class WhatsAppService {
                                         console.error("Error triggering admin alert from keyword:", adminErr);
                                     }
 
-                                    // 2. Randomized Delay for Customer Reply (Total 80-100s)
-                                    // 60s already passed, so add 20-40s more.
-                                    const finalDelay = Math.floor(Math.random() * (40000 - 20000 + 1)) + 20000;
-                                    await WhatsAppService.delay(finalDelay);
+                                    // 2. Delay 80s for Customer Reply (As requested: 80s after admin)
+                                    await WhatsAppService.delay(80000);
                                 }
 
                                 // Use Configured Replies (SEND TO CUSTOMER LAST)

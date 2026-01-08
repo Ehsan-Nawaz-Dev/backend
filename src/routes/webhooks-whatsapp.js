@@ -70,9 +70,8 @@ router.post("/", async (req, res) => {
                 console.error("Error triggering admin alert from webhook:", adminErr);
               }
 
-              // Total 80-100s randomized delay
-              const finalDelay = Math.floor(Math.random() * (40000 - 20000 + 1)) + 20000;
-              await (await import("../services/whatsappService.js")).whatsappService.constructor.delay(finalDelay);
+              // 80s delay for Customer Reply (As requested: 80s after admin)
+              await (await import("../services/whatsappService.js")).whatsappService.constructor.delay(80000);
             }
 
             log.message = `Customer voted ${selectedOption} 📊`;
