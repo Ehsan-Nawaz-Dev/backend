@@ -135,9 +135,8 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     const customerTemplate = await Template.findOne({ merchant: updatedMerchant?._id, event: "orders/create" });
                     let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
 
-                    // Replace Placeholders
+                    // Replace Placeholders (Now handles customer_name, address, city, price)
                     customerMsg = replacePlaceholders(customerMsg, { order, merchant: updatedMerchant });
-                    customerMsg = customerMsg.replace(/{{customer_name}}/g, customerName);
 
                     let result;
                     if (customerTemplate?.isPoll && customerTemplate?.pollOptions?.length > 0) {
