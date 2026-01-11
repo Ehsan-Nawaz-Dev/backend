@@ -24,12 +24,19 @@ router.post("/", async (req, res) => {
         let replyText = "";
         let tagToAdd = "";
 
-        if (selectedOption === "✅Yes, Confirm✅") {
+        const isConfirm = selectedOption.toLowerCase().includes("confirm") ||
+          selectedOption.toLowerCase().includes("yes") ||
+          selectedOption.includes("✅");
+        const isCancel = selectedOption.toLowerCase().includes("cancel") ||
+          selectedOption.toLowerCase().includes("no") ||
+          selectedOption.includes("❌");
+
+        if (isConfirm) {
           replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
-          tagToAdd = "Order Confirmed";
-        } else if (selectedOption === "❌No, Cancel❌") {
+          tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+        } else if (isCancel) {
           replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
-          tagToAdd = "Order Cancelled";
+          tagToAdd = merchant.orderCancelTag || "Order Cancelled";
         }
 
         if (tagToAdd) {

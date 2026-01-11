@@ -68,7 +68,20 @@ class WhatsAppService {
                 if (qr) {
                     console.log(`QR Code generated for ${shopDomain}`);
                     const qrCodeDataURL = await qrcode.toDataURL(qr);
-                    await WhatsAppSession.findOneAndUpdate({ shopDomain }, { qrCode: qrCodeDataURL, status: "qr_ready" });
+
+                    // Always update session with QR code
+                    await WhatsAppSession.findOneAndUpdate(
+                        { shopDomain },
+                        {
+                            qrCode: qrCodeDataURL,
+                            status: "qr_ready",
+                            isConnected: false
+                        },
+                        { upsert: true } // Create if doesn't exist
+                    );
+
+                    console.log(`QR code stored for ${shopDomain}, ready to display`);
+
                     if (this.io) this.io.to(shopDomain).emit("qr", { qrCode: qrCodeDataURL });
                 }
 
@@ -156,7 +169,7 @@ class WhatsAppService {
                                 // or better, we check if the user provided pseudo-logic we can match.
                                 // If they select 'Yes', use orderConfirmReply.
                                 const replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
-                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, "Order Confirmed");
+                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, merchant.orderConfirmTag || "Order Confirmed");
 
                                 // 1. Delay 60s before Admin Alert (As requested)
                                 await WhatsAppService.delay(60000);
@@ -200,10 +213,10 @@ class WhatsAppService {
                     let activityStatus = null;
 
                     if (input.includes("confirm") || input.includes("yes") || input.includes("theek")) {
-                        tagToAdd = "Order Confirmed";
+                        tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
                         activityStatus = "confirmed";
                     } else if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi")) {
-                        tagToAdd = "Order Cancelled";
+                        tagToAdd = merchant.orderCancelTag || "Order Cancelled";
                         activityStatus = "cancelled";
                     }
 

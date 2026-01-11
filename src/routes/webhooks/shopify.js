@@ -155,7 +155,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                                 shopDomain,
                                 updatedMerchant.shopifyAccessToken,
                                 order.id,
-                                "Pending Order Confirmation"
+                                updatedMerchant.pendingConfirmTag || "Pending Order Confirmation"
                             );
                         }
 
