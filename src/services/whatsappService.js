@@ -156,7 +156,7 @@ class WhatsAppService {
                                 // or better, we check if the user provided pseudo-logic we can match.
                                 // If they select 'Yes', use orderConfirmReply.
                                 const replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
-                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, merchant.orderConfirmTag || "Order Confirmed");
+                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, "Order Confirmed");
 
                                 // 1. Delay 60s before Admin Alert (As requested)
                                 await WhatsAppService.delay(60000);
@@ -203,8 +203,8 @@ class WhatsAppService {
                         tagToAdd = "Order Confirmed";
                         activityStatus = "confirmed";
                     } else if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi")) {
-                        tagToAdd = "Order Rejected";
-                        activityStatus = "rejected";
+                        tagToAdd = "Order Cancelled";
+                        activityStatus = "cancelled";
                     }
 
                     if (tagToAdd) {
@@ -230,7 +230,9 @@ class WhatsAppService {
 
                                 // Optional: Update activity message
                                 log.message = `Customer replied: ${tagToAdd} 💬`;
-                                if (activityStatus === "rejected") log.type = "failed";
+                                if (activityStatus === "cancelled") {
+                                    log.type = "cancelled";
+                                }
                                 await log.save();
 
                                 // TRIGGER ADMIN ALERT (ONLY IF CONFIRMED)

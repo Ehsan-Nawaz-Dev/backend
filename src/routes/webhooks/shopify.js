@@ -150,10 +150,13 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
                         // ADD SHOPIFY TAGS
                         if (updatedMerchant?.shopifyAccessToken) {
-                            await shopifyService.addOrderTag(shopDomain, updatedMerchant.shopifyAccessToken, order.id, "WhatsApp Sent");
-                            if (updatedMerchant.pendingConfirmTag) {
-                                await shopifyService.addOrderTag(shopDomain, updatedMerchant.shopifyAccessToken, order.id, updatedMerchant.pendingConfirmTag);
-                            }
+                            // Add "Pending Order Confirmation" tag (standardized)
+                            await shopifyService.addOrderTag(
+                                shopDomain,
+                                updatedMerchant.shopifyAccessToken,
+                                order.id,
+                                "Pending Order Confirmation"
+                            );
                         }
 
                         // 4. UPDATE DASHBOARD TO GREEN (CONFIRMED)

@@ -26,10 +26,10 @@ router.post("/", async (req, res) => {
 
         if (selectedOption === "✅Yes, Confirm✅") {
           replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
-          tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+          tagToAdd = "Order Confirmed";
         } else if (selectedOption === "❌No, Cancel❌") {
           replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
-          tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+          tagToAdd = "Order Cancelled";
         }
 
         if (tagToAdd) {

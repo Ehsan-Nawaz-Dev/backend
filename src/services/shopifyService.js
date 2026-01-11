@@ -8,7 +8,7 @@ class ShopifyService {
      * @param {string} orderId - The ID of the order to update
      * @param {string} newTag - The tag to add
      */
-    async addOrderTag(shopDomain, accessToken, orderId, newTag) {
+    async addOrderTag(shopDomain, accessToken, orderId, newTag, removeConflictingTags = true) {
         if (!accessToken) {
             console.warn(`No access token for ${shopDomain}, skipping tagging.`);
             return { success: false, error: "Missing access token" };
@@ -22,14 +22,30 @@ class ShopifyService {
             });
 
             const currentTags = getResponse.data.order.tags || "";
-            const tagArray = currentTags.split(",").map(t => t.trim()).filter(t => t);
+            let tagArray = currentTags.split(",").map(t => t.trim()).filter(t => t);
 
-            // 2. Add if not already present
+            // 2. Remove conflicting tags if needed
+            if (removeConflictingTags) {
+                const orderStatusTags = [
+                    "Pending Order Confirmation",
+                    "Order Confirmed",
+                    "Order Cancelled",
+                    "Order Rejected",
+                    "Pending Confirmation", // Legacy tag
+                    "Confirmed", // Legacy tag
+                    "Cancelled" // Legacy tag
+                ];
+
+                // Remove all order status tags except the new one
+                tagArray = tagArray.filter(tag => !orderStatusTags.includes(tag));
+            }
+
+            // 3. Add new tag if not already present
             if (!tagArray.includes(newTag)) {
                 tagArray.push(newTag);
             }
 
-            // 3. Update order
+            // 4. Update order
             const putResponse = await axios.put(url, {
                 order: {
                     id: orderId,
