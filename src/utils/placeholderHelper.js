@@ -68,14 +68,24 @@ export const replacePlaceholders = (template, data) => {
         "{{order_number}}": order.name || order.order_number || `#${order.id || order.order_id}`,
         "{{customer_name}}": (order.customer?.first_name ? `${order.customer.first_name} ${order.customer.last_name || ""}`.trim() : (order.shipping_address?.name || order.billing_address?.name || "Customer")),
         "{{order_id}}": (order.id || order.order_id)?.toString() || "",
+
+        // Price placeholders
+        "{{grand_total}}": `${currency} ${price}`.trim(),
+        "{{price}}": `${currency} ${price}`.trim(),
         "{{total_price}}": `${currency} ${price}`.trim(),
-        "{{price}}": price,
+
+        // Address placeholders
         "{{address}}": address,
         "{{shipping_address}}": address,
         "{{city}}": city,
+
+        // Contact placeholders
         "{{phone}}": customerPhone,
         "{{customer_phone}}": customerPhone,
+
+        // Order details
         "{{items_list}}": (order.line_items || order.order?.line_items || []).map(item => `${item.title} x ${item.quantity}`).join(", "),
+        "{{tracking_link}}": order.fulfillments?.[0]?.tracking_url || "",
     };
 
     let message = template;
