@@ -64,7 +64,11 @@ class ShopifyService {
                 "Order Rejected",
                 "Pending Confirmation",
                 "Confirmed",
-                "Cancelled"
+                "Cancelled",
+                "Subscription Required",
+                "Order Pending",
+                "Confirmed Order",
+                "Cancelled Order"
             ];
 
             const tagsToRemove = [...new Set([...defaultStatusTags, ...extraTagsToRemove.filter(t => t)])];

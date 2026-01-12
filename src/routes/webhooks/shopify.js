@@ -197,8 +197,8 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                                 shopDomain,
                                 updatedMerchant.shopifyAccessToken,
                                 orderId,
-                                updatedMerchant.pendingConfirmTag || "Pending Order Confirmation",
-                                [updatedMerchant.orderConfirmTag, updatedMerchant.orderCancelTag]
+                                updatedMerchant.pendingConfirmTag || "Order Pending",
+                                [updatedMerchant.orderConfirmTag, updatedMerchant.orderCancelTag, "Subscription Required"]
                             );
                             console.log(`[ShopifyWebhook] Tagging result for order ${orderId}:`, tagResult);
                         } else {

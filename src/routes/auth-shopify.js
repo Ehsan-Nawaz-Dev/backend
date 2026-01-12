@@ -104,9 +104,9 @@ router.get("/callback", async (req, res) => {
       timezone: shopData?.iana_timezone || null,
       country: shopData?.country_name || null,
       // Default settings (merchant can customize later)
-      pendingConfirmTag: "Pending Confirmation",
-      orderConfirmTag: "Confirmed",
-      orderCancelTag: "Cancelled",
+      pendingConfirmTag: "Order Pending",
+      orderConfirmTag: "Confirmed Order",
+      orderCancelTag: "Cancelled Order",
       orderConfirmReply: "Thank you! Your order has been confirmed. ✅",
       orderCancelReply: "Your order has been cancelled. ❌",
       isActive: true,

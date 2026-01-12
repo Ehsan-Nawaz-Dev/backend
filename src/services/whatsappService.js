@@ -164,16 +164,16 @@ class WhatsAppService {
                             const log = await ActivityLog.findOne({
                                 merchant: merchant._id,
                                 customerPhone: new RegExp(from.slice(-10)),
-                                type: "confirmed"
+                                type: { $in: ["pending", "confirmed"] }
                             }).sort({ createdAt: -1 });
 
                             if (log && log.orderId) {
-                                // Default to confirm for now if we can't perfectly distinguish vote without keys,
-                                // or better, we check if the user provided pseudo-logic we can match.
-                                // If they select 'Yes', use orderConfirmReply.
+                                // Use merchant settings for tags and replies
+                                const tagToAdd = merchant.orderConfirmTag || "Confirmed Order";
                                 const replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
-                                const tagsToRemove = [merchant.pendingConfirmTag, merchant.orderCancelTag];
-                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, merchant.orderConfirmTag || "Order Confirmed", tagsToRemove);
+                                const tagsToRemove = [merchant.pendingConfirmTag, merchant.orderCancelTag, "Subscription Required"];
+
+                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
 
                                 // 1. Delay 60s before Admin Alert (As requested)
                                 await WhatsAppService.delay(60000);
@@ -238,15 +238,15 @@ class WhatsAppService {
                             const log = await ActivityLog.findOne({
                                 merchant: merchant._id,
                                 customerPhone: new RegExp(from.slice(-10)),
-                                type: "confirmed"
+                                type: { $in: ["pending", "confirmed"] }
                             }).sort({ createdAt: -1 });
 
                             if (log && log.orderId) {
                                 console.log(`Linking reply from ${from} to Shopify Order ${log.orderId}`);
                                 const isConfirm = activityStatus === "confirmed";
                                 const tagsToRemove = isConfirm
-                                    ? [merchant.pendingConfirmTag, merchant.orderCancelTag]
-                                    : [merchant.pendingConfirmTag, merchant.orderConfirmTag];
+                                    ? [merchant.pendingConfirmTag, merchant.orderCancelTag, "Subscription Required"]
+                                    : [merchant.pendingConfirmTag, merchant.orderConfirmTag, "Subscription Required"];
 
                                 await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
 
