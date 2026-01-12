@@ -21,6 +21,11 @@ export const replacePlaceholders = (template, data) => {
         order.order?.billing_address?.city
     ]) || "City not provided";
 
+    // DEBUG: Log the actual address objects to see what's available
+    console.log(`[PlaceholderHelper] DEBUG - shipping_address:`, JSON.stringify(order.shipping_address || null));
+    console.log(`[PlaceholderHelper] DEBUG - billing_address:`, JSON.stringify(order.billing_address || null));
+    console.log(`[PlaceholderHelper] DEBUG - customer.default_address:`, JSON.stringify(order.customer?.default_address || null));
+
     const rawPrice = findValue([
         order.total_price,
         order.current_total_price,

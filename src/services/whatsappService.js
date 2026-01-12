@@ -87,26 +87,29 @@ class WhatsAppService {
 
                 if (connection === "close") {
                     const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-                    const reconnectReasons = [
-                        DisconnectReason.connectionClosed,
-                        DisconnectReason.connectionLost,
-                        DisconnectReason.restartRequired,
-                        DisconnectReason.timedOut,
-                        DisconnectReason.unavailableService,
-                        DisconnectReason.connectionReplaced
+                    const errorMessage = lastDisconnect?.error?.message || "Unknown error";
+
+                    console.log(`Connection CLOSED for ${shopDomain}. Status: ${statusCode}. Error: ${errorMessage}`);
+
+                    // Update session status
+                    await WhatsAppSession.findOneAndUpdate(
+                        { shopDomain },
+                        { status: "disconnected", isConnected: false, errorMessage: errorMessage }
+                    );
+
+                    // Always try to reconnect unless explicitly logged out or device was removed
+                    const permanentDisconnects = [
+                        DisconnectReason.loggedOut, // 401
+                        DisconnectReason.badSession // 500
                     ];
-                    const shouldReconnect = reconnectReasons.includes(statusCode) || statusCode >= 500;
 
-                    console.log(`Connection CLOSED for ${shopDomain}. Status: ${statusCode}. Reconnecting: ${shouldReconnect}`);
-
-                    if (shouldReconnect) {
-                        setTimeout(() => this.initializeClient(shopDomain), 5000);
-                    } else if (statusCode === DisconnectReason.loggedOut) {
-                        console.log(`Explicit logout for ${shopDomain}. Cleaning up.`);
-                        this.disconnectClient(shopDomain);
+                    if (permanentDisconnects.includes(statusCode)) {
+                        console.log(`Permanent disconnect for ${shopDomain}. Clearing auth and stopping.`);
+                        await this.disconnectClient(shopDomain);
                     } else {
-                        console.log(`Unidentified disconnect for ${shopDomain}. Attempting safe reconnect...`);
-                        setTimeout(() => this.initializeClient(shopDomain), 5000);
+                        // Reconnect after a delay (increased to 8 seconds to avoid rapid loops)
+                        console.log(`Attempting reconnect for ${shopDomain} in 8 seconds...`);
+                        setTimeout(() => this.initializeClient(shopDomain), 8000);
                     }
                 } else if (connection === "open") {
                     console.log(`WhatsApp socket ready for ${shopDomain}`);
