@@ -147,6 +147,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
                     // Refetch again after potential delay for the most up-to-date token
                     const updatedMerchant = await Merchant.findOne({ shopDomain });
+                    console.log(`[ShopifyWebhook] Merchant found. Has accessToken: ${!!updatedMerchant?.shopifyAccessToken}, Token length: ${updatedMerchant?.shopifyAccessToken?.length || 0}`);
 
                     // FETCH COMPLETE ORDER FROM SHOPIFY API (webhook may have incomplete data)
                     let fullOrderData = order; // Default to webhook data
@@ -156,11 +157,15 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                             const apiOrderData = await shopifyService.getOrder(shopDomain, updatedMerchant.shopifyAccessToken, orderId);
                             if (apiOrderData) {
                                 fullOrderData = apiOrderData;
-                                console.log(`[ShopifyWebhook] Got complete order from API. Has shipping_address: ${!!apiOrderData.shipping_address}`);
+                                console.log(`[ShopifyWebhook] Got complete order from API. Has shipping_address: ${!!apiOrderData.shipping_address}, Has address1: ${!!apiOrderData.shipping_address?.address1}`);
+                            } else {
+                                console.warn(`[ShopifyWebhook] API returned null for order ${orderId}, using webhook data`);
                             }
                         } catch (apiErr) {
                             console.warn(`[ShopifyWebhook] Failed to fetch order from API, using webhook data:`, apiErr.message);
                         }
+                    } else {
+                        console.warn(`[ShopifyWebhook] Skipping API fetch - accessToken: ${!!updatedMerchant?.shopifyAccessToken}, orderId: ${orderId}`);
                     }
 
                     const customerTemplate = await Template.findOne({ merchant: updatedMerchant?._id, event: "orders/create" });

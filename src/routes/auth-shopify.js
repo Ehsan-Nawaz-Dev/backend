@@ -80,7 +80,7 @@ router.get("/callback", async (req, res) => {
       return res.status(500).send("Invalid Shopify OAuth response");
     }
 
-    // Store or update merchant record with access token
+    // Store or update merchant record with access token and default tags
     const merchant = await Merchant.findOneAndUpdate(
       { shopDomain: shop },
       {
@@ -88,14 +88,21 @@ router.get("/callback", async (req, res) => {
           shopDomain: shop,
           shopifyAccessToken: accessToken,
         },
+        $setOnInsert: {
+          // Only set these defaults for NEW merchants
+          pendingConfirmTag: "Pending Confirmation",
+          orderConfirmTag: "Confirmed",
+          orderCancelTag: "Cancelled"
+        }
       },
       { new: true, upsert: true },
     );
 
-    console.log("Shopify merchant authorized", merchant.shopDomain);
+    console.log(`Shopify merchant authorized: ${merchant.shopDomain} (Token Length: ${accessToken.length})`);
 
-    // Redirect merchant to frontend dashboard (can be embedded later)
-    return res.redirect(FRONTEND_APP_URL);
+    // Redirect merchant to frontend dashboard (with shop param for auto-login)
+    const redirectUrl = `${FRONTEND_APP_URL}?shop=${encodeURIComponent(shop)}`;
+    return res.redirect(redirectUrl);
   } catch (err) {
     console.error("Error handling Shopify OAuth callback", err);
     res.status(500).send("Internal server error");
