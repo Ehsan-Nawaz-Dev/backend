@@ -96,14 +96,26 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
     // Format the Customer Phone (Ensure country code)
     let customerPhoneFormatted = customerPhoneRaw;
-    if (customerPhoneFormatted && !customerPhoneFormatted.startsWith('92')) {
-        customerPhoneFormatted = '92' + customerPhoneFormatted;
+    if (customerPhoneFormatted) {
+        // Remove all non-digits
+        customerPhoneFormatted = customerPhoneFormatted.replace(/\D/g, '');
+
+        if (!customerPhoneFormatted.startsWith('92')) {
+            // If it starts with 0 (e.g., 0300...), remove 0 and add 92
+            if (customerPhoneFormatted.startsWith('0')) {
+                customerPhoneFormatted = '92' + customerPhoneFormatted.substring(1);
+            } else {
+                customerPhoneFormatted = '92' + customerPhoneFormatted;
+            }
+        }
     }
 
     if (topic === "orders/create") {
         // 1. Create the Activity Log as 'pending'
         const orderId = order.id?.toString() || order.order_id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null);
         console.log(`[ShopifyWebhook] Processing order ${orderNumber} (ID: ${orderId})`);
+        console.log(`[ShopifyWebhook] Order object keys: ${Object.keys(order).join(", ")}`);
+        if (order.order) console.log(`[ShopifyWebhook] Found nested order object. Keys: ${Object.keys(order.order).join(", ")}`);
 
         const activity = await ActivityLog.create({
             merchant: merchant?._id,
@@ -139,30 +151,33 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
 
                     // Replace Placeholders (Now handles customer_name, address, city, price)
-                    console.log(`[ShopifyWebhook] Replacing placeholders in: "${customerMsg.substring(0, 50)}..."`);
+                    console.log(`[ShopifyWebhook] Replacing placeholders in message for order ${orderId}`);
                     customerMsg = replacePlaceholders(customerMsg, { order, merchant: updatedMerchant });
-                    console.log(`[ShopifyWebhook] Final message preview: "${customerMsg.substring(0, 50)}..."`);
+                    console.log(`[ShopifyWebhook] Final message to send: ${customerMsg}`);
 
                     let result;
+                    console.log(`[ShopifyWebhook] Sending WhatsApp to ${customerPhoneFormatted} via ${updatedMerchant.whatsappProvider}...`);
                     if (customerTemplate?.isPoll && customerTemplate?.pollOptions?.length > 0) {
                         result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, customerMsg, customerTemplate.pollOptions);
                     } else {
                         result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, customerMsg);
                     }
+                    console.log(`[ShopifyWebhook] WhatsApp send result:`, result);
 
-                    if (result.success) {
+                    if (result && result.success) {
                         await automationService.trackSent(shopDomain, "order-confirmation");
 
                         // ADD SHOPIFY TAGS
                         if (updatedMerchant?.shopifyAccessToken) {
                             console.log(`[ShopifyWebhook] Applying pending tag to order ${orderId}`);
-                            await shopifyService.addOrderTag(
+                            const tagResult = await shopifyService.addOrderTag(
                                 shopDomain,
                                 updatedMerchant.shopifyAccessToken,
                                 orderId,
                                 updatedMerchant.pendingConfirmTag || "Pending Order Confirmation",
                                 [updatedMerchant.orderConfirmTag, updatedMerchant.orderCancelTag]
                             );
+                            console.log(`[ShopifyWebhook] Tagging result for order ${orderId}:`, tagResult);
                         }
 
                         // 4. UPDATE DASHBOARD TO GREEN (CONFIRMED)
@@ -172,7 +187,9 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                             await activity.save();
                         }
                     } else {
-                        throw new Error(result.error || "Failed to send WhatsApp message");
+                        const errorMsg = result?.error || "Failed to send WhatsApp message (unknown error)";
+                        console.error(`[ShopifyWebhook] WhatsApp Error for ${shopDomain}: ${errorMsg}`);
+                        throw new Error(errorMsg);
                     }
                 } else if (activity) {
                     // If customer setting disabled but admin alert was sent, mark as confirmed/processed

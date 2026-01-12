@@ -33,6 +33,14 @@ export const replacePlaceholders = (template, data) => {
     const currency = order.currency || order.presentment_currency || order.order?.currency || "";
     const customerPhone = order.customer?.phone || order.shipping_address?.phone || order.billing_address?.phone || order.phone || "";
 
+    console.log(`[PlaceholderHelper] Extracted values:`, {
+        address,
+        city,
+        price,
+        currency,
+        customerName: order.customer?.first_name ? `${order.customer.first_name} ${order.customer.last_name || ""}`.trim() : (order.shipping_address?.name || order.billing_address?.name || "Customer")
+    });
+
     const placeholders = {
         "{{store_name}}": merchant?.storeName || merchant?.shopDomain || "",
         "{{order_number}}": order.name || order.order_number || `#${order.id || order.order_id}`,
@@ -45,7 +53,7 @@ export const replacePlaceholders = (template, data) => {
         "{{city}}": city,
         "{{phone}}": customerPhone,
         "{{customer_phone}}": customerPhone,
-        "{{items_list}}": (order.line_items || []).map(item => `${item.title} x ${item.quantity}`).join(", "),
+        "{{items_list}}": (order.line_items || order.order?.line_items || []).map(item => `${item.title} x ${item.quantity}`).join(", "),
     };
 
     let message = template;
