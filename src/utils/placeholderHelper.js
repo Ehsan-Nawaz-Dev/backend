@@ -3,14 +3,20 @@ export const replacePlaceholders = (template, data) => {
     const { order, merchant } = data;
     const findValue = (values) => values.find(v => v !== null && v !== undefined && v !== "") || "";
 
-    // Robust Extraction
+    // Robust Extraction with additional fallbacks
+    // Note: Some Shopify stores don't send address1 or city in webhooks
     const address = findValue([
         order.shipping_address?.address1,
         order.shipping_address?.address2,
         order.billing_address?.address1,
+        order.billing_address?.address2,
         order.customer?.default_address?.address1,
         order.order?.shipping_address?.address1,
-        order.order?.billing_address?.address1
+        order.order?.billing_address?.address1,
+        // Fallback to country if no street address
+        order.shipping_address?.country,
+        order.billing_address?.country,
+        order.customer?.default_address?.country
     ]) || "Address not provided";
 
     const city = findValue([
@@ -18,7 +24,13 @@ export const replacePlaceholders = (template, data) => {
         order.billing_address?.city,
         order.customer?.default_address?.city,
         order.order?.shipping_address?.city,
-        order.order?.billing_address?.city
+        order.order?.billing_address?.city,
+        // Fallback to province or country if no city
+        order.shipping_address?.province,
+        order.billing_address?.province,
+        order.shipping_address?.country,
+        order.billing_address?.country,
+        order.customer?.default_address?.country
     ]) || "City not provided";
 
     // DEBUG: Log the actual address objects to see what's available
@@ -29,13 +41,18 @@ export const replacePlaceholders = (template, data) => {
     const rawPrice = findValue([
         order.total_price,
         order.current_total_price,
+        order.subtotal_price,
+        order.total_line_items_price,
         order.total_price_set?.shop_money?.amount,
+        order.current_total_price_set?.shop_money?.amount,
         order.order?.total_price,
         order.order?.current_total_price
     ]) || "0.00";
 
     const price = typeof rawPrice === 'number' ? rawPrice.toFixed(2) : rawPrice;
     const currency = order.currency || order.presentment_currency || order.order?.currency || "";
+
+    console.log(`[PlaceholderHelper] DEBUG - Price extracted: ${currency} ${price} (raw: ${rawPrice})`);
     const customerPhone = order.customer?.phone || order.shipping_address?.phone || order.billing_address?.phone || order.phone || "";
 
     console.log(`[PlaceholderHelper] Extracted values:`, {

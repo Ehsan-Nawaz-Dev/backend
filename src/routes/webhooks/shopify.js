@@ -147,12 +147,28 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
                     // Refetch again after potential delay for the most up-to-date token
                     const updatedMerchant = await Merchant.findOne({ shopDomain });
+
+                    // FETCH COMPLETE ORDER FROM SHOPIFY API (webhook may have incomplete data)
+                    let fullOrderData = order; // Default to webhook data
+                    if (updatedMerchant?.shopifyAccessToken && orderId) {
+                        console.log(`[ShopifyWebhook] Fetching complete order data from Shopify API for order ${orderId}...`);
+                        try {
+                            const apiOrderData = await shopifyService.getOrder(shopDomain, updatedMerchant.shopifyAccessToken, orderId);
+                            if (apiOrderData) {
+                                fullOrderData = apiOrderData;
+                                console.log(`[ShopifyWebhook] Got complete order from API. Has shipping_address: ${!!apiOrderData.shipping_address}`);
+                            }
+                        } catch (apiErr) {
+                            console.warn(`[ShopifyWebhook] Failed to fetch order from API, using webhook data:`, apiErr.message);
+                        }
+                    }
+
                     const customerTemplate = await Template.findOne({ merchant: updatedMerchant?._id, event: "orders/create" });
                     let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
 
-                    // Replace Placeholders (Now handles customer_name, address, city, price)
+                    // Replace Placeholders using the FULL order data from API
                     console.log(`[ShopifyWebhook] Replacing placeholders in message for order ${orderId}`);
-                    customerMsg = replacePlaceholders(customerMsg, { order, merchant: updatedMerchant });
+                    customerMsg = replacePlaceholders(customerMsg, { order: fullOrderData, merchant: updatedMerchant });
                     console.log(`[ShopifyWebhook] Final message to send: ${customerMsg}`);
 
                     let result;
