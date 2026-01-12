@@ -115,6 +115,84 @@ class ShopifyService {
             return null;
         }
     }
+
+    /**
+     * Registers a webhook with Shopify
+     */
+    async registerWebhook(shopDomain, accessToken, topic, callbackUrl) {
+        try {
+            const url = `https://${shopDomain}/admin/api/2023-10/webhooks.json`;
+            const response = await axios.post(url, {
+                webhook: {
+                    topic: topic,
+                    address: callbackUrl,
+                    format: "json"
+                }
+            }, {
+                headers: { "X-Shopify-Access-Token": accessToken }
+            });
+            console.log(`[ShopifyService] Registered webhook: ${topic}`);
+            return { success: true, data: response.data.webhook };
+        } catch (error) {
+            // Webhook might already exist
+            if (error.response?.status === 422) {
+                console.log(`[ShopifyService] Webhook ${topic} already exists`);
+                return { success: true, existing: true };
+            }
+            console.error(`[ShopifyService] Error registering webhook ${topic}:`, error.response?.data || error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Gets shop information from Shopify
+     */
+    async getShopInfo(shopDomain, accessToken) {
+        try {
+            const url = `https://${shopDomain}/admin/api/2023-10/shop.json`;
+            const response = await axios.get(url, {
+                headers: { "X-Shopify-Access-Token": accessToken }
+            });
+            return response.data.shop;
+        } catch (error) {
+            console.error(`[ShopifyService] Error getting shop info:`, error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Complete auto-setup for a new merchant installation
+     * Registers all required webhooks automatically
+     */
+    async autoSetupMerchant(shopDomain, accessToken, webhookBaseUrl) {
+        console.log(`[ShopifyService] Starting auto-setup for ${shopDomain}...`);
+
+        const webhooks = [
+            { topic: "orders/create", path: "/api/webhooks/shopify" },
+            { topic: "orders/cancelled", path: "/api/webhooks/shopify" },
+            { topic: "orders/updated", path: "/api/webhooks/shopify" },
+            { topic: "checkouts/create", path: "/api/webhooks/shopify" },
+            { topic: "fulfillments/create", path: "/api/webhooks/shopify" },
+            { topic: "fulfillments/update", path: "/api/webhooks/shopify" },
+            { topic: "app/uninstalled", path: "/api/webhooks/shopify" }
+        ];
+
+        const results = [];
+        for (const webhook of webhooks) {
+            const callbackUrl = `${webhookBaseUrl}${webhook.path}`;
+            const result = await this.registerWebhook(shopDomain, accessToken, webhook.topic, callbackUrl);
+            results.push({ topic: webhook.topic, ...result });
+        }
+
+        // Get shop info to save store name
+        const shopInfo = await this.getShopInfo(shopDomain, accessToken);
+
+        console.log(`[ShopifyService] Auto-setup complete for ${shopDomain}`);
+        return {
+            webhooks: results,
+            shopInfo: shopInfo
+        };
+    }
 }
 
 export const shopifyService = new ShopifyService();
