@@ -1,5 +1,6 @@
 import { Router } from "express";
 import fetch from "node-fetch";
+import crypto from "crypto";
 import dotenv from "dotenv";
 import { Merchant } from "../models/Merchant.js";
 import { Template } from "../models/Template.js";
@@ -48,13 +49,25 @@ router.get("/", async (req, res) => {
 // GET /api/auth/shopify/callback?shop=...&code=...
 router.get("/callback", async (req, res) => {
   try {
-    const { shop, code } = req.query;
+    const { shop, code, hmac } = req.query;
     if (!shop || !code || typeof shop !== "string" || typeof code !== "string") {
       return res.status(400).send("Missing shop or code parameter");
     }
 
     if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
       return res.status(500).send("Shopify API credentials are not configured on the server");
+    }
+
+    // HMAC Validation (security check)
+    if (hmac) {
+      const queryParams = { ...req.query };
+      delete queryParams.hmac;
+      const message = Object.keys(queryParams).sort().map(key => `${key}=${queryParams[key]}`).join('&');
+      const generatedHmac = crypto.createHmac('sha256', SHOPIFY_API_SECRET).update(message).digest('hex');
+      if (generatedHmac !== hmac) {
+        console.error('[OAuth] HMAC validation failed');
+        return res.status(401).send('HMAC validation failed');
+      }
     }
 
     const tokenUrl = `https://${shop}/admin/oauth/access_token`;
@@ -117,7 +130,12 @@ router.get("/callback", async (req, res) => {
     if (setupResult.shopInfo) {
       merchant.storeName = setupResult.shopInfo.name;
       merchant.email = setupResult.shopInfo.email;
+      merchant.phone = setupResult.shopInfo.phone;
       merchant.currency = setupResult.shopInfo.currency;
+      merchant.timezone = setupResult.shopInfo.iana_timezone;
+      merchant.country = setupResult.shopInfo.country_name;
+      merchant.installedAt = merchant.installedAt || new Date();
+      merchant.isActive = true;
       await merchant.save();
       console.log(`[OAuth] Store info saved: ${setupResult.shopInfo.name}`);
     }
