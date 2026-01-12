@@ -80,25 +80,31 @@ router.get("/callback", async (req, res) => {
       return res.status(500).send("Invalid Shopify OAuth response");
     }
 
-    // Store or update merchant record with access token and default tags
-    const merchant = await Merchant.findOneAndUpdate(
-      { shopDomain: shop },
-      {
-        $set: {
-          shopDomain: shop,
-          shopifyAccessToken: accessToken,
-        },
-        $setOnInsert: {
-          // Only set these defaults for NEW merchants
-          pendingConfirmTag: "Pending Confirmation",
-          orderConfirmTag: "Confirmed",
-          orderCancelTag: "Cancelled"
-        }
-      },
-      { new: true, upsert: true },
-    );
+    // Store or update merchant record with access token
+    // For existing merchants: update token. For new merchants: also set default tags.
+    let merchant = await Merchant.findOne({ shopDomain: shop });
 
-    console.log(`Shopify merchant authorized: ${merchant.shopDomain} (Token Length: ${accessToken.length})`);
+    if (merchant) {
+      // EXISTING merchant - just update the token
+      merchant.shopifyAccessToken = accessToken;
+      // Also set default tags if they don't exist
+      if (!merchant.pendingConfirmTag) merchant.pendingConfirmTag = "Pending Confirmation";
+      if (!merchant.orderConfirmTag) merchant.orderConfirmTag = "Confirmed";
+      if (!merchant.orderCancelTag) merchant.orderCancelTag = "Cancelled";
+      await merchant.save();
+      console.log(`Shopify merchant RE-AUTHORIZED: ${merchant.shopDomain} (Token updated, length: ${accessToken.length})`);
+    } else {
+      // NEW merchant - create with all defaults
+      merchant = await Merchant.create({
+        shopDomain: shop,
+        shopifyAccessToken: accessToken,
+        pendingConfirmTag: "Pending Confirmation",
+        orderConfirmTag: "Confirmed",
+        orderCancelTag: "Cancelled",
+        whatsappProvider: "device"
+      });
+      console.log(`NEW Shopify merchant created: ${merchant.shopDomain} (Token length: ${accessToken.length})`);
+    }
 
     // Redirect merchant to frontend dashboard (with shop param for auto-login)
     const redirectUrl = `${FRONTEND_APP_URL}?shop=${encodeURIComponent(shop)}`;

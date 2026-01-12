@@ -189,6 +189,8 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                         await automationService.trackSent(shopDomain, "order-confirmation");
 
                         // ADD SHOPIFY TAGS
+                        console.log(`[ShopifyWebhook] Checking if we can tag order. AccessToken present: ${!!updatedMerchant?.shopifyAccessToken}`);
+
                         if (updatedMerchant?.shopifyAccessToken) {
                             console.log(`[ShopifyWebhook] Applying pending tag to order ${orderId}`);
                             const tagResult = await shopifyService.addOrderTag(
@@ -199,6 +201,8 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                                 [updatedMerchant.orderConfirmTag, updatedMerchant.orderCancelTag]
                             );
                             console.log(`[ShopifyWebhook] Tagging result for order ${orderId}:`, tagResult);
+                        } else {
+                            console.warn(`[ShopifyWebhook] SKIPPING TAGGING - No shopifyAccessToken found for ${shopDomain}. Please complete Shopify OAuth.`);
                         }
 
                         // 4. UPDATE DASHBOARD TO GREEN (CONFIRMED)
