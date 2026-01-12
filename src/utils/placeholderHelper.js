@@ -9,34 +9,42 @@ export const replacePlaceholders = (template, data) => {
         order.shipping_address?.address2,
         order.billing_address?.address1,
         order.customer?.default_address?.address1,
-        order.order?.shipping_address?.address1
+        order.order?.shipping_address?.address1,
+        order.order?.billing_address?.address1
     ]) || "Address not provided";
 
     const city = findValue([
         order.shipping_address?.city,
         order.billing_address?.city,
         order.customer?.default_address?.city,
-        order.order?.shipping_address?.city
+        order.order?.shipping_address?.city,
+        order.order?.billing_address?.city
     ]) || "City not provided";
 
     const rawPrice = findValue([
         order.total_price,
         order.current_total_price,
         order.total_price_set?.shop_money?.amount,
-        order.order?.total_price
+        order.order?.total_price,
+        order.order?.current_total_price
     ]) || "0.00";
 
     const price = typeof rawPrice === 'number' ? rawPrice.toFixed(2) : rawPrice;
-    const currency = order.currency || order.presentment_currency || "";
+    const currency = order.currency || order.presentment_currency || order.order?.currency || "";
+    const customerPhone = order.customer?.phone || order.shipping_address?.phone || order.billing_address?.phone || order.phone || "";
 
     const placeholders = {
         "{{store_name}}": merchant?.storeName || merchant?.shopDomain || "",
-        "{{order_number}}": order.name || order.order_number || `#${order.id}`,
-        "{{customer_name}}": order.customer?.first_name ? `${order.customer.first_name} ${order.customer.last_name || ""}`.trim() : (order.shipping_address?.name || order.billing_address?.name || ""),
+        "{{order_number}}": order.name || order.order_number || `#${order.id || order.order_id}`,
+        "{{customer_name}}": (order.customer?.first_name ? `${order.customer.first_name} ${order.customer.last_name || ""}`.trim() : (order.shipping_address?.name || order.billing_address?.name || "Customer")),
         "{{order_id}}": (order.id || order.order_id)?.toString() || "",
         "{{total_price}}": `${currency} ${price}`.trim(),
+        "{{price}}": price,
         "{{address}}": address,
+        "{{shipping_address}}": address,
         "{{city}}": city,
+        "{{phone}}": customerPhone,
+        "{{customer_phone}}": customerPhone,
         "{{items_list}}": (order.line_items || []).map(item => `${item.title} x ${item.quantity}`).join(", "),
     };
 

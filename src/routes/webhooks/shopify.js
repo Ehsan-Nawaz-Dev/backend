@@ -102,10 +102,13 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
     if (topic === "orders/create") {
         // 1. Create the Activity Log as 'pending'
+        const orderId = order.id?.toString() || order.order_id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null);
+        console.log(`[ShopifyWebhook] Processing order ${orderNumber} (ID: ${orderId})`);
+
         const activity = await ActivityLog.create({
             merchant: merchant?._id,
             type: 'pending',
-            orderId: order.id?.toString(),
+            orderId: orderId,
             message: 'Processing Order Notification...',
             customerName: customerName,
             customerPhone: customerPhoneFormatted,
@@ -136,7 +139,9 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
 
                     // Replace Placeholders (Now handles customer_name, address, city, price)
+                    console.log(`[ShopifyWebhook] Replacing placeholders in: "${customerMsg.substring(0, 50)}..."`);
                     customerMsg = replacePlaceholders(customerMsg, { order, merchant: updatedMerchant });
+                    console.log(`[ShopifyWebhook] Final message preview: "${customerMsg.substring(0, 50)}..."`);
 
                     let result;
                     if (customerTemplate?.isPoll && customerTemplate?.pollOptions?.length > 0) {
@@ -150,12 +155,13 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
                         // ADD SHOPIFY TAGS
                         if (updatedMerchant?.shopifyAccessToken) {
-                            // Add "Pending Order Confirmation" tag (standardized)
+                            console.log(`[ShopifyWebhook] Applying pending tag to order ${orderId}`);
                             await shopifyService.addOrderTag(
                                 shopDomain,
                                 updatedMerchant.shopifyAccessToken,
-                                order.id,
-                                updatedMerchant.pendingConfirmTag || "Pending Order Confirmation"
+                                orderId,
+                                updatedMerchant.pendingConfirmTag || "Pending Order Confirmation",
+                                [updatedMerchant.orderConfirmTag, updatedMerchant.orderCancelTag]
                             );
                         }
 

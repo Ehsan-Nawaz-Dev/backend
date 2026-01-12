@@ -48,7 +48,11 @@ router.post("/", async (req, res) => {
           }).sort({ createdAt: -1 });
 
           if (log && log.orderId) {
-            await shopifyService.addOrderTag(shop, merchant.shopifyAccessToken, log.orderId, tagToAdd);
+            const tagsToRemove = isConfirm
+              ? [merchant.pendingConfirmTag, merchant.orderCancelTag]
+              : [merchant.pendingConfirmTag, merchant.orderConfirmTag];
+
+            await shopifyService.addOrderTag(shop, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
 
             // 2. TRIGGER ADMIN ALERT (ONLY IF CONFIRMED)
             if (selectedOption === "✅Yes, Confirm✅") {

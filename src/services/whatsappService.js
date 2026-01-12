@@ -169,7 +169,8 @@ class WhatsAppService {
                                 // or better, we check if the user provided pseudo-logic we can match.
                                 // If they select 'Yes', use orderConfirmReply.
                                 const replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
-                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, merchant.orderConfirmTag || "Order Confirmed");
+                                const tagsToRemove = [merchant.pendingConfirmTag, merchant.orderCancelTag];
+                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, merchant.orderConfirmTag || "Order Confirmed", tagsToRemove);
 
                                 // 1. Delay 60s before Admin Alert (As requested)
                                 await WhatsAppService.delay(60000);
@@ -239,7 +240,12 @@ class WhatsAppService {
 
                             if (log && log.orderId) {
                                 console.log(`Linking reply from ${from} to Shopify Order ${log.orderId}`);
-                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd);
+                                const isConfirm = activityStatus === "confirmed";
+                                const tagsToRemove = isConfirm
+                                    ? [merchant.pendingConfirmTag, merchant.orderCancelTag]
+                                    : [merchant.pendingConfirmTag, merchant.orderConfirmTag];
+
+                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
 
                                 // Optional: Update activity message
                                 log.message = `Customer replied: ${tagToAdd} 💬`;
