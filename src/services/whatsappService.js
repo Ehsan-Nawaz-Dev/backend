@@ -432,21 +432,48 @@ class WhatsAppService {
 
     async sendMessage(shopDomain, phoneNumber, message) {
         try {
+            console.log(`[WhatsApp] sendMessage called for ${shopDomain} to ${phoneNumber}`);
             const sock = this.sockets.get(shopDomain);
-            if (!sock || !sock.user) return { success: false, error: "WhatsApp not connected" };
+
+            if (!sock) {
+                console.error(`[WhatsApp] No socket found for ${shopDomain}. Available sockets: ${Array.from(this.sockets.keys()).join(", ") || "none"}`);
+                return { success: false, error: "WhatsApp not connected - no socket" };
+            }
+
+            if (!sock.user) {
+                console.error(`[WhatsApp] Socket exists but no user for ${shopDomain}. Connection might be initializing.`);
+                return { success: false, error: "WhatsApp not connected - not authenticated" };
+            }
+
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
+            console.log(`[WhatsApp] Sending message to ${formattedNumber}@s.whatsapp.net`);
+
             await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, { text: message });
+            console.log(`[WhatsApp] Message sent successfully to ${formattedNumber}`);
             return { success: true };
         } catch (error) {
+            console.error(`[WhatsApp] Error sending message:`, error);
             return { success: false, error: error.message };
         }
     }
 
     async sendPoll(shopDomain, phoneNumber, pollName, pollOptions) {
         try {
+            console.log(`[WhatsApp] sendPoll called for ${shopDomain} to ${phoneNumber}`);
             const sock = this.sockets.get(shopDomain);
-            if (!sock || !sock.user) return { success: false, error: "WhatsApp not connected" };
+
+            if (!sock) {
+                console.error(`[WhatsApp] No socket found for ${shopDomain}. Available sockets: ${Array.from(this.sockets.keys()).join(", ") || "none"}`);
+                return { success: false, error: "WhatsApp not connected - no socket" };
+            }
+
+            if (!sock.user) {
+                console.error(`[WhatsApp] Socket exists but no user for ${shopDomain}. Connection might be initializing.`);
+                return { success: false, error: "WhatsApp not connected - not authenticated" };
+            }
+
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
+            console.log(`[WhatsApp] Sending poll to ${formattedNumber}@s.whatsapp.net with options:`, pollOptions);
 
             await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, {
                 poll: {
@@ -455,8 +482,10 @@ class WhatsAppService {
                     selectableCount: 1
                 }
             });
+            console.log(`[WhatsApp] Poll sent successfully to ${formattedNumber}`);
             return { success: true };
         } catch (error) {
+            console.error(`[WhatsApp] Error sending poll:`, error);
             return { success: false, error: error.message };
         }
     }
