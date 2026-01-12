@@ -1,12 +1,11 @@
 import { Router } from "express";
-import fetch from "node-fetch";
+import axios from "axios";
+import crypto from "crypto";
 import dotenv from "dotenv";
 import { Merchant } from "../models/Merchant.js";
 import { Template } from "../models/Template.js";
 import { AutomationSetting } from "../models/AutomationSetting.js";
-import { shopifyService } from "../services/shopifyService.js";
 
-// Make sure env vars are loaded even if this module is imported before server.js runs dotenv.config()
 dotenv.config();
 
 const router = Router();
@@ -17,112 +16,152 @@ const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || "read_orders,write_orders";
 const SHOPIFY_APP_URL = (process.env.SHOPIFY_APP_URL || "http://localhost:5000").replace(/\/$/, "");
 const FRONTEND_APP_URL = process.env.FRONTEND_APP_URL || "http://localhost:5173/dashboard";
 
-// Start OAuth install / auth flow
+// Step 1: Redirect merchant to Shopify OAuth
 // GET /api/auth/shopify?shop={shop}.myshopify.com
-router.get("/", async (req, res) => {
-  try {
-    const shop = req.query.shop;
-    if (!shop || typeof shop !== "string") {
-      return res.status(400).send("Missing shop parameter");
-    }
+router.get("/", (req, res) => {
+  const { shop } = req.query;
 
-    if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
-      return res.status(500).send("Shopify API credentials are not configured on the server");
-    }
-
-    const redirectUri = `${SHOPIFY_APP_URL}/api/auth/shopify/callback`;
-    const scopes = SHOPIFY_SCOPES;
-
-    const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${encodeURIComponent(
-      SHOPIFY_API_KEY,
-    )}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(redirectUri)}`;
-
-    return res.redirect(installUrl);
-  } catch (err) {
-    console.error("Error starting Shopify OAuth", err);
-    res.status(500).send("Internal server error");
+  if (!shop) {
+    return res.status(400).send("Missing shop parameter");
   }
+
+  if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
+    return res.status(500).send("Shopify API credentials are not configured on the server");
+  }
+
+  const redirectUri = `${SHOPIFY_APP_URL}/api/auth/shopify/callback`;
+  const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${SHOPIFY_SCOPES}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+
+  console.log(`[OAuth] Redirecting ${shop} to Shopify authorization...`);
+  res.redirect(installUrl);
 });
 
-// OAuth callback to exchange code for access token
-// GET /api/auth/shopify/callback?shop=...&code=...
+// Step 2: Handle OAuth callback - FULLY AUTOMATIC SETUP
+// GET /api/auth/shopify/callback?shop=...&code=...&hmac=...
 router.get("/callback", async (req, res) => {
+  const { shop, code, hmac } = req.query;
+
+  if (!shop || !code) {
+    return res.status(400).send("Missing required parameters");
+  }
+
+  // Verify HMAC (if provided) for security
+  if (hmac && SHOPIFY_API_SECRET) {
+    const queryParams = { ...req.query };
+    delete queryParams.hmac;
+    delete queryParams.signature; // Also remove signature if present
+
+    const message = Object.keys(queryParams)
+      .sort()
+      .map(key => `${key}=${queryParams[key]}`)
+      .join("&");
+
+    const generatedHmac = crypto
+      .createHmac("sha256", SHOPIFY_API_SECRET)
+      .update(message)
+      .digest("hex");
+
+    if (generatedHmac !== hmac) {
+      console.error("[OAuth] HMAC validation failed");
+      return res.status(401).send("HMAC validation failed");
+    }
+    console.log("[OAuth] HMAC validated successfully");
+  }
+
   try {
-    const { shop, code } = req.query;
-    if (!shop || !code || typeof shop !== "string" || typeof code !== "string") {
-      return res.status(400).send("Missing shop or code parameter");
-    }
-
-    if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
-      return res.status(500).send("Shopify API credentials are not configured on the server");
-    }
-
-    const tokenUrl = `https://${shop}/admin/oauth/access_token`;
-
-    const tokenRes = await fetch(tokenUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_id: SHOPIFY_API_KEY,
-        client_secret: SHOPIFY_API_SECRET,
-        code,
-      }),
+    // Exchange code for access token
+    const tokenResponse = await axios.post(`https://${shop}/admin/oauth/access_token`, {
+      client_id: SHOPIFY_API_KEY,
+      client_secret: SHOPIFY_API_SECRET,
+      code
     });
 
-    if (!tokenRes.ok) {
-      const text = await tokenRes.text();
-      console.error("Failed to exchange Shopify OAuth code", tokenRes.status, text);
-      return res.status(500).send("Failed to complete Shopify OAuth");
-    }
+    const accessToken = tokenResponse.data.access_token;
+    console.log(`[OAuth] Got access token for ${shop}`);
 
-    const tokenJson = await tokenRes.json();
-    const accessToken = tokenJson.access_token;
+    // ===== AUTOMATIC SETUP STARTS HERE =====
 
-    if (!accessToken) {
-      console.error("No access_token in Shopify OAuth response", tokenJson);
-      return res.status(500).send("Invalid Shopify OAuth response");
-    }
-
-    console.log(`[OAuth] Starting auto-setup for ${shop}...`);
-
-    // ========== 1. SAVE/UPDATE MERCHANT ==========
-    let merchant = await Merchant.findOne({ shopDomain: shop });
-    let isNewMerchant = !merchant;
-
-    if (merchant) {
-      // EXISTING merchant - update the token
-      merchant.shopifyAccessToken = accessToken;
-      if (!merchant.pendingConfirmTag) merchant.pendingConfirmTag = "Pending Confirmation";
-      if (!merchant.orderConfirmTag) merchant.orderConfirmTag = "Confirmed";
-      if (!merchant.orderCancelTag) merchant.orderCancelTag = "Cancelled";
-      await merchant.save();
-      console.log(`[OAuth] Merchant RE-AUTHORIZED: ${merchant.shopDomain}`);
-    } else {
-      // NEW merchant - create with all defaults
-      merchant = await Merchant.create({
-        shopDomain: shop,
-        shopifyAccessToken: accessToken,
-        pendingConfirmTag: "Pending Confirmation",
-        orderConfirmTag: "Confirmed",
-        orderCancelTag: "Cancelled",
-        whatsappProvider: "device"
+    // 1. Fetch Shop Details
+    let shopData = null;
+    try {
+      const shopResponse = await axios.get(`https://${shop}/admin/api/2024-01/shop.json`, {
+        headers: { "X-Shopify-Access-Token": accessToken }
       });
-      console.log(`[OAuth] NEW Merchant created: ${merchant.shopDomain}`);
+      shopData = shopResponse.data.shop;
+      console.log(`[OAuth] Fetched shop details: ${shopData.name}`);
+    } catch (shopError) {
+      console.warn("[OAuth] Could not fetch shop details:", shopError.message);
     }
 
-    // ========== 2. AUTO-REGISTER WEBHOOKS ==========
-    const setupResult = await shopifyService.autoSetupMerchant(shop, accessToken, SHOPIFY_APP_URL);
+    // 2. Create or Update Merchant Record
+    const merchantData = {
+      shopDomain: shop,
+      shopifyAccessToken: accessToken,
+      storeName: shopData?.name || shop,
+      email: shopData?.email || null,
+      phone: shopData?.phone || null,
+      currency: shopData?.currency || "USD",
+      timezone: shopData?.iana_timezone || null,
+      country: shopData?.country_name || null,
+      // Default settings (merchant can customize later)
+      pendingConfirmTag: "Pending Confirmation",
+      orderConfirmTag: "Confirmed",
+      orderCancelTag: "Cancelled",
+      orderConfirmReply: "Thank you! Your order has been confirmed. ✅",
+      orderCancelReply: "Your order has been cancelled. ❌",
+      isActive: true,
+      installedAt: new Date()
+    };
 
-    // Update merchant with store info
-    if (setupResult.shopInfo) {
-      merchant.storeName = setupResult.shopInfo.name;
-      merchant.email = setupResult.shopInfo.email;
-      merchant.currency = setupResult.shopInfo.currency;
-      await merchant.save();
-      console.log(`[OAuth] Store info saved: ${setupResult.shopInfo.name}`);
+    const existingMerchant = await Merchant.findOne({ shopDomain: shop });
+    let merchant;
+    let isNewMerchant = !existingMerchant;
+
+    if (existingMerchant) {
+      // Update existing - preserve custom settings, just update token and shop info
+      existingMerchant.shopifyAccessToken = accessToken;
+      existingMerchant.storeName = shopData?.name || existingMerchant.storeName;
+      existingMerchant.email = shopData?.email || existingMerchant.email;
+      existingMerchant.phone = shopData?.phone || existingMerchant.phone;
+      existingMerchant.currency = shopData?.currency || existingMerchant.currency;
+      existingMerchant.timezone = shopData?.iana_timezone || existingMerchant.timezone;
+      existingMerchant.country = shopData?.country_name || existingMerchant.country;
+      existingMerchant.isActive = true;
+      await existingMerchant.save();
+      merchant = existingMerchant;
+      console.log(`[OAuth] Merchant RE-AUTHORIZED: ${shop}`);
+    } else {
+      merchant = await Merchant.create(merchantData);
+      console.log(`[OAuth] NEW Merchant created: ${shop}`);
     }
 
-    // ========== 3. CREATE DEFAULT TEMPLATES (if new merchant) ==========
+    // 3. Register Webhooks Automatically
+    const webhooksToRegister = [
+      { topic: "orders/create", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
+      { topic: "orders/cancelled", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
+      { topic: "orders/updated", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
+      { topic: "checkouts/create", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
+      { topic: "fulfillments/create", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
+      { topic: "fulfillments/update", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
+      { topic: "app/uninstalled", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` }
+    ];
+
+    for (const webhook of webhooksToRegister) {
+      try {
+        await axios.post(
+          `https://${shop}/admin/api/2024-01/webhooks.json`,
+          { webhook: { ...webhook, format: "json" } },
+          { headers: { "X-Shopify-Access-Token": accessToken } }
+        );
+        console.log(`[OAuth] Registered webhook: ${webhook.topic}`);
+      } catch (webhookError) {
+        // Webhook might already exist (422) or other error
+        const errorMsg = webhookError.response?.data?.errors || webhookError.message;
+        console.log(`[OAuth] Webhook ${webhook.topic}: ${JSON.stringify(errorMsg)}`);
+      }
+    }
+
+    // 4. Create Default Templates (for new merchants only)
     if (isNewMerchant) {
       const defaultTemplates = [
         {
@@ -149,9 +188,9 @@ Please confirm if these details are correct.`,
           event: "orders/cancelled",
           message: `Hi {{customer_name}},
 
-Your order {{order_number}} has been cancelled as requested.
+Your order {{order_number}} has been cancelled.
 
-If this was a mistake, please contact us to place a new order.
+If this was a mistake, please contact us.
 
 Thank you for shopping with {{store_name}}!`,
           enabled: true,
@@ -197,7 +236,7 @@ Address: {{address}}, {{city}}`,
       console.log(`[OAuth] Default templates created for ${shop}`);
     }
 
-    // ========== 4. CREATE DEFAULT AUTOMATION SETTINGS ==========
+    // 5. Create Default Automation Settings
     const defaultAutomations = [
       { shopDomain: shop, type: "order-confirmation", enabled: true },
       { shopDomain: shop, type: "abandoned-cart", enabled: false },
@@ -213,14 +252,32 @@ Address: {{address}}, {{city}}`,
     }
     console.log(`[OAuth] Automation settings configured for ${shop}`);
 
-    console.log(`[OAuth] ✅ Auto-setup COMPLETE for ${shop}`);
+    console.log(`[OAuth] ✅ Automatic setup COMPLETE for ${shop}`);
 
-    // Redirect merchant to frontend dashboard (with shop param for auto-login)
-    const redirectUrl = `${FRONTEND_APP_URL}?shop=${encodeURIComponent(shop)}&setup=complete`;
-    return res.redirect(redirectUrl);
-  } catch (err) {
-    console.error("Error handling Shopify OAuth callback", err);
-    res.status(500).send("Internal server error");
+    // Redirect to frontend dashboard
+    res.redirect(`${FRONTEND_APP_URL}?shop=${encodeURIComponent(shop)}&installed=true`);
+
+  } catch (error) {
+    console.error("[OAuth] Error during setup:", error.response?.data || error.message);
+    res.status(500).send("Installation failed. Please try again.");
+  }
+});
+
+// Handle app uninstall webhook
+router.post("/uninstall", async (req, res) => {
+  try {
+    const shopDomain = req.get("x-shopify-shop-domain");
+    if (shopDomain) {
+      await Merchant.findOneAndUpdate(
+        { shopDomain },
+        { isActive: false, shopifyAccessToken: null }
+      );
+      console.log(`[OAuth] App uninstalled for ${shopDomain}`);
+    }
+    res.status(200).send("OK");
+  } catch (error) {
+    console.error("[OAuth] Uninstall error:", error);
+    res.status(200).send("OK"); // Always return 200 for webhooks
   }
 });
 
