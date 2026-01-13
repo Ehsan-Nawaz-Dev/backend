@@ -9,38 +9,52 @@ const SHOPIFY_APP_URL = (process.env.SHOPIFY_APP_URL || "http://localhost:5000")
 // Create Charge
 router.post('/create', async (req, res) => {
     const { shop } = req.query;
-    const { plan } = req.body; // 'beginner', 'intermediate', or 'pro'
+    const { plan } = req.body;
+    console.log(`[Billing] Creating charge for shop: ${shop}, plan: ${plan}`);
 
-    if (!plans[plan]) {
-        return res.status(400).json({ message: 'Invalid plan' });
-    }
+    if (!plans[plan]) return res.status(400).json({ message: 'Invalid plan selected' });
 
     try {
         const merchant = await Merchant.findOne({ shopDomain: shop });
-        if (!merchant) {
-            return res.status(404).json({ message: 'Merchant not found' });
-        }
 
-        // Create Application Charge via Shopify API
+        // 2. Error if Merchant not found
+        if (!merchant) {
+            console.error(`[Billing] Merchant ${shop} not found in database`);
+            return res.status(404).json({ message: 'Merchant not found. Please reinstall the app.' });
+        }
+        // 3. Error if Access Token is missing
+        if (!merchant.shopifyAccessToken) {
+            console.error(`[Billing] Access token missing for ${shop}`);
+            return res.status(403).json({ message: 'Shopify token missing. Please reinstall the app.' });
+        }
+        // 4. Create Charge
         const chargeData = {
             recurring_application_charge: {
                 name: `${plans[plan].name} Plan`,
                 price: plans[plan].price,
                 return_url: `${SHOPIFY_APP_URL}/api/billing/confirm?shop=${shop}&plan=${plan}`,
-                test: true // Set to false for production
+                test: true
             }
         };
-
+        console.log(`[Billing] Sending request to Shopify...`);
         const response = await axios.post(
             `https://${shop}/admin/api/2024-01/recurring_application_charges.json`,
             chargeData,
             { headers: { 'X-Shopify-Access-Token': merchant.shopifyAccessToken } }
         );
-
         res.json({ confirmationUrl: response.data.recurring_application_charge.confirmation_url });
     } catch (error) {
-        console.error('Billing Error:', error.response?.data || error.message);
-        res.status(500).json({ message: 'Failed to create charge' });
+        // 5. CAUSE OF YOUR ERROR: Check your terminal/console for this log!
+        console.error('--- BILLING ERROR DETAIL ---');
+        console.error('Status:', error.response?.status);
+        console.error('Data:', error.response?.data);
+        console.error('Message:', error.message);
+
+        const shopifyError = error.response?.data?.errors || error.message;
+        res.status(500).json({
+            message: 'Failed to create charge',
+            detail: shopifyError
+        });
     }
 });
 
