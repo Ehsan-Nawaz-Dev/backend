@@ -12,7 +12,7 @@ const router = Router();
 
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
-const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || "read_orders,write_orders";
+const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || "read_orders,write_orders,write_billing";
 const SHOPIFY_APP_URL = (process.env.SHOPIFY_APP_URL || "http://localhost:5000").replace(/\/$/, "");
 const FRONTEND_APP_URL = process.env.FRONTEND_APP_URL || "http://localhost:5173/dashboard";
 

@@ -30,7 +30,7 @@ router.post('/create', async (req, res) => {
 
         // Diagnostics: Verify token works with a simple shop info fetch
         try {
-            await axios.get(`https://${shop}/admin/api/2024-01/shop.json`, {
+            await axios.get(`https://${shop}/admin/api/2024-10/shop.json`, {
                 headers: { 'X-Shopify-Access-Token': merchant.shopifyAccessToken }
             });
             console.log(`[Billing] Diagnostics: Token verified for ${shop}`);
@@ -52,7 +52,7 @@ router.post('/create', async (req, res) => {
         console.log(`[Billing] Sending request to Shopify...`);
 
         const response = await axios.post(
-            `https://${shop}/admin/api/2024-01/recurring_application_charges.json`,
+            `https://${shop}/admin/api/2024-10/recurring_application_charges.json`,
             chargeData,
             {
                 headers: {
@@ -89,7 +89,7 @@ router.get('/confirm', async (req, res) => {
 
         // Activate the charge
         await axios.post(
-            `https://${shop}/admin/api/2024-01/recurring_application_charges/${charge_id}/activate.json`,
+            `https://${shop}/admin/api/2024-10/recurring_application_charges/${charge_id}/activate.json`,
             {},
             { headers: { 'X-Shopify-Access-Token': merchant.shopifyAccessToken } }
         );
