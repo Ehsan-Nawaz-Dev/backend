@@ -97,19 +97,20 @@ class WhatsAppService {
                         { status: "disconnected", isConnected: false, errorMessage: errorMessage }
                     );
 
-                    // Always try to reconnect unless explicitly logged out or device was removed
-                    const permanentDisconnects = [
-                        DisconnectReason.loggedOut, // 401
-                        DisconnectReason.badSession // 500
-                    ];
+                    // Reconnection Logic
+                    const isConflict = errorMessage.toLowerCase().includes("conflict");
+                    const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-                    if (permanentDisconnects.includes(statusCode)) {
-                        console.log(`Permanent disconnect for ${shopDomain}. Clearing auth and stopping.`);
-                        await this.disconnectClient(shopDomain);
+                    if (isLoggedOut || (isConflict && statusCode === 401)) {
+                        console.log(`Permanent disconnect (Logout/Conflict) for ${shopDomain}. Stopping auto-reconnect.`);
+                        // Don't disconnectClient here to keep auth files for manual retry if it was just a transient conflict
+                    } else if (isConflict) {
+                        console.log(`Conflict detected for ${shopDomain}. Waiting 30 seconds before retry to allow old connection to expire...`);
+                        setTimeout(() => this.initializeClient(shopDomain), 30000);
                     } else {
-                        // Reconnect after a delay (increased to 8 seconds to avoid rapid loops)
-                        console.log(`Attempting reconnect for ${shopDomain} in 8 seconds...`);
-                        setTimeout(() => this.initializeClient(shopDomain), 8000);
+                        // Regular reconnect after 10 seconds
+                        console.log(`Attempting reconnect for ${shopDomain} in 10 seconds...`);
+                        setTimeout(() => this.initializeClient(shopDomain), 10000);
                     }
                 } else if (connection === "open") {
                     console.log(`WhatsApp socket ready for ${shopDomain}`);

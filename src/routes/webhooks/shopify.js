@@ -41,10 +41,11 @@ const verifyShopifyWebhook = (req, res, next) => {
 
     if (!hmac) return res.status(401).send("No HMAC header");
 
-    const body = JSON.stringify(req.body);
+    // Use rawBody captured in server.js middleware for perfect HMAC matching
+    const body = req.rawBody || JSON.stringify(req.body);
     const hash = crypto
         .createHmac("sha256", secret)
-        .update(body, "utf8")
+        .update(body)
         .digest("base64");
 
     if (hash === hmac) {
