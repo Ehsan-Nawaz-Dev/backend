@@ -27,27 +27,46 @@ router.post('/create', async (req, res) => {
             console.error(`[Billing] Access token missing for ${shop}`);
             return res.status(403).json({ message: 'Shopify token missing. Please reinstall the app.' });
         }
+
+        // Diagnostics: Verify token works with a simple shop info fetch
+        try {
+            await axios.get(`https://${shop}/admin/api/2024-01/shop.json`, {
+                headers: { 'X-Shopify-Access-Token': merchant.shopifyAccessToken }
+            });
+            console.log(`[Billing] Diagnostics: Token verified for ${shop}`);
+        } catch (diagErr) {
+            console.error(`[Billing] Diagnostics: Token verification FAILED for ${shop}:`, diagErr.response?.data || diagErr.message);
+        }
+
         // 4. Create Charge
         const chargeData = {
             recurring_application_charge: {
                 name: `${plans[plan].name} Plan`,
-                price: plans[plan].price,
+                price: plans[plan].price.toString(), // Ensure price is a string
                 return_url: `${SHOPIFY_APP_URL}/api/billing/confirm?shop=${shop}&plan=${plan}`,
                 test: true
             }
         };
+
+        console.log(`[Billing] Request Payload:`, JSON.stringify(chargeData));
         console.log(`[Billing] Sending request to Shopify...`);
+
         const response = await axios.post(
             `https://${shop}/admin/api/2024-01/recurring_application_charges.json`,
             chargeData,
-            { headers: { 'X-Shopify-Access-Token': merchant.shopifyAccessToken } }
+            {
+                headers: {
+                    'X-Shopify-Access-Token': merchant.shopifyAccessToken,
+                    'Content-Type': 'application/json'
+                }
+            }
         );
         res.json({ confirmationUrl: response.data.recurring_application_charge.confirmation_url });
     } catch (error) {
-        // 5. CAUSE OF YOUR ERROR: Check your terminal/console for this log!
         console.error('--- BILLING ERROR DETAIL ---');
         console.error('Status:', error.response?.status);
-        console.error('Data:', error.response?.data);
+        console.error('Data:', JSON.stringify(error.response?.data || 'NO_BODY'));
+        console.error('Headers:', JSON.stringify(error.response?.headers || 'NO_HEADERS'));
         console.error('Message:', error.message);
 
         const shopifyError = error.response?.data?.errors || error.message;
