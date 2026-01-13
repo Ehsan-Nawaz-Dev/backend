@@ -64,6 +64,54 @@ router.get("/merchant", async (req, res) => {
     }
 });
 
+/**
+ * Manual endpoint to save access token
+ * POST /api/debug/save-token
+ * Body: { "shop": "ezone-9374.myshopify.com", "accessToken": "shpat_..." }
+ */
+router.post("/save-token", async (req, res) => {
+    try {
+        const { shop, accessToken } = req.body;
+
+        if (!shop || !accessToken) {
+            return res.status(400).json({
+                error: "Missing required fields",
+                required: ["shop", "accessToken"]
+            });
+        }
+
+        // Update merchant with access token
+        const merchant = await Merchant.findOneAndUpdate(
+            { shopDomain: shop },
+            {
+                shopifyAccessToken: accessToken,
+                isActive: true,
+                installedAt: new Date()
+            },
+            { upsert: true, new: true }
+        );
+
+        console.log(`[Debug] Manually saved access token for ${shop}`);
+
+        res.json({
+            success: true,
+            message: "Access token saved successfully",
+            merchant: {
+                shopDomain: merchant.shopDomain,
+                hasAccessToken: true,
+                accessTokenLength: accessToken.length
+            }
+        });
+
+    } catch (error) {
+        console.error("[Debug] Error saving token:", error);
+        res.status(500).json({
+            error: "Failed to save token",
+            message: error.message
+        });
+    }
+});
+
 function generateRecommendations(merchant) {
     const recommendations = [];
 
