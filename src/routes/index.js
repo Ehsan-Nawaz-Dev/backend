@@ -13,6 +13,7 @@ import whatsappCloudRouter from "./whatsapp-cloud.js";
 import qrcodeRouter from "./qrcode.js";
 import automationsRouter from "./automations.js";
 import campaignsRouter from "./campaigns.js";
+import debugRouter from "./debug-merchant.js";
 
 const router = Router();
 
@@ -134,5 +135,6 @@ router.use("/whatsapp-cloud", whatsappCloudRouter);
 router.use("/qrcode", qrcodeRouter);
 router.use("/automations", automationsRouter);
 router.use("/campaigns", campaignsRouter);
+router.use("/debug", debugRouter);
 
 export default router;
