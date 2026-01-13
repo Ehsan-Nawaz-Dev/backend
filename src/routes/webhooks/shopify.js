@@ -176,6 +176,28 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     customerMsg = replacePlaceholders(customerMsg, { order: fullOrderData, merchant: updatedMerchant });
                     console.log(`[ShopifyWebhook] Final message to send: ${customerMsg}`);
 
+                    // 1. ADD PENDING TAG FIRST (Before sending message)
+                    console.log(`[ShopifyWebhook] Checking if we can tag order. AccessToken present: ${!!updatedMerchant?.shopifyAccessToken}`);
+                    if (updatedMerchant?.shopifyAccessToken) {
+                        try {
+                            const pendingTag = updatedMerchant.pendingConfirmTag || "Order Pending";
+                            console.log(`[ShopifyWebhook] Applying pending tag "${pendingTag}" to order ${orderId}`);
+
+                            const tagResult = await shopifyService.addOrderTag(
+                                shopDomain,
+                                updatedMerchant.shopifyAccessToken,
+                                orderId,
+                                pendingTag,
+                                [updatedMerchant.orderConfirmTag, updatedMerchant.orderCancelTag, "Subscription Required"]
+                            );
+                            console.log(`[ShopifyWebhook] Tagging result for order ${orderId}:`, tagResult);
+                        } catch (tagErr) {
+                            console.error(`[ShopifyWebhook] Failed to add pending tag:`, tagErr);
+                        }
+                    } else {
+                        console.warn(`[ShopifyWebhook] SKIPPING TAGGING - No shopifyAccessToken found for ${shopDomain}. Please complete Shopify OAuth.`);
+                    }
+
                     let result;
                     console.log(`[ShopifyWebhook] Sending WhatsApp to ${customerPhoneFormatted} via ${updatedMerchant.whatsappProvider}...`);
                     if (customerTemplate?.isPoll && customerTemplate?.pollOptions?.length > 0) {
@@ -187,23 +209,6 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
                     if (result && result.success) {
                         await automationService.trackSent(shopDomain, "order-confirmation");
-
-                        // ADD SHOPIFY TAGS
-                        console.log(`[ShopifyWebhook] Checking if we can tag order. AccessToken present: ${!!updatedMerchant?.shopifyAccessToken}`);
-
-                        if (updatedMerchant?.shopifyAccessToken) {
-                            console.log(`[ShopifyWebhook] Applying pending tag to order ${orderId}`);
-                            const tagResult = await shopifyService.addOrderTag(
-                                shopDomain,
-                                updatedMerchant.shopifyAccessToken,
-                                orderId,
-                                updatedMerchant.pendingConfirmTag || "Order Pending",
-                                [updatedMerchant.orderConfirmTag, updatedMerchant.orderCancelTag, "Subscription Required"]
-                            );
-                            console.log(`[ShopifyWebhook] Tagging result for order ${orderId}:`, tagResult);
-                        } else {
-                            console.warn(`[ShopifyWebhook] SKIPPING TAGGING - No shopifyAccessToken found for ${shopDomain}. Please complete Shopify OAuth.`);
-                        }
 
                         // 4. UPDATE DASHBOARD TO GREEN (CONFIRMED)
                         if (activity) {
