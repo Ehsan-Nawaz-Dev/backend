@@ -65,11 +65,22 @@ router.post('/create', async (req, res) => {
     } catch (error) {
         console.error('--- BILLING ERROR DETAIL ---');
         console.error('Status:', error.response?.status);
-        console.error('Data:', JSON.stringify(error.response?.data || 'NO_BODY'));
+
+        // Handle HTML responses (Shopify sometimes returns HTML on 403)
+        let responseData = error.response?.data;
+        if (typeof responseData === 'string' && responseData.includes('<!DOCTYPE html>')) {
+            console.error('Data: [HTML Response Detected]');
+            // Extract title or body text if possible for quick debugging
+            const match = responseData.match(/<title>(.*?)<\/title>/);
+            if (match) console.error('HTML Title:', match[1]);
+        } else {
+            console.error('Data:', JSON.stringify(responseData || 'NO_BODY'));
+        }
+
         console.error('Headers:', JSON.stringify(error.response?.headers || 'NO_HEADERS'));
         console.error('Message:', error.message);
 
-        const shopifyError = error.response?.data?.errors || error.message;
+        const shopifyError = (typeof responseData === 'object' && responseData?.errors) || error.message;
         res.status(500).json({
             message: 'Failed to create charge',
             detail: shopifyError

@@ -12,7 +12,8 @@ const router = Router();
 
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
-const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || "read_orders,write_orders,write_billing";
+const SHOPIFY_SCOPES = "read_orders,write_orders,write_billing";
+console.log(`[OAuth] Active Scopes: ${SHOPIFY_SCOPES}`);
 const SHOPIFY_APP_URL = (process.env.SHOPIFY_APP_URL || "http://localhost:5000").replace(/\/$/, "");
 const FRONTEND_APP_URL = process.env.FRONTEND_APP_URL || "http://localhost:5173/dashboard";
 
@@ -166,8 +167,14 @@ router.get("/callback", async (req, res) => {
 
     console.log(`[OAuth] ✅ Automatic setup COMPLETE for ${shop}`);
 
-    // Redirect to frontend dashboard
-    res.redirect(`${FRONTEND_APP_URL}?shop=${encodeURIComponent(shop)}&installed=true`);
+    // Redirect to frontend dashboard (including host for App Bridge)
+    const host = req.query.host;
+    const redirectUrl = new URL(FRONTEND_APP_URL);
+    redirectUrl.searchParams.append("shop", shop);
+    if (host) redirectUrl.searchParams.append("host", host);
+    redirectUrl.searchParams.append("installed", "true");
+
+    res.redirect(redirectUrl.toString());
 
   } catch (error) {
     console.error("[OAuth] Error during setup:", error.response?.data || error.message);
