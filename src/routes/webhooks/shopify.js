@@ -132,6 +132,28 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         // Processing continues in the background
         (async () => {
             try {
+                // 1. ALWAYS ADD PENDING TAG & CLEANUP (Regardless of automation settings)
+                console.log(`[ShopifyWebhook] Checking if we can tag order. AccessToken present: ${!!merchant?.shopifyAccessToken}`);
+                if (merchant?.shopifyAccessToken) {
+                    try {
+                        const pendingTag = merchant.pendingConfirmTag || "Order Pending";
+                        console.log(`[ShopifyWebhook] Applying pending tag "${pendingTag}" to order ${orderId}`);
+
+                        const tagResult = await shopifyService.addOrderTag(
+                            shopDomain,
+                            merchant.shopifyAccessToken,
+                            orderId,
+                            pendingTag,
+                            [merchant.orderConfirmTag, merchant.orderCancelTag, "Subscription Required"]
+                        );
+                        console.log(`[ShopifyWebhook] Tagging result for order ${orderId}:`, tagResult);
+                    } catch (tagErr) {
+                        console.error(`[ShopifyWebhook] Failed to add pending tag:`, tagErr);
+                    }
+                } else {
+                    console.warn(`[ShopifyWebhook] SKIPPING TAGGING - No shopifyAccessToken found for ${shopDomain}.`);
+                }
+
                 // Trigger 1: Customer Confirmation (Customer is notified IMMEDIATELY)
                 const customerSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
                 if (customerSetting?.enabled) {
