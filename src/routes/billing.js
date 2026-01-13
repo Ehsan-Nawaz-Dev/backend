@@ -79,12 +79,16 @@ router.get('/status', async (req, res) => {
     const { shop } = req.query;
     try {
         const merchant = await Merchant.findOne({ shopDomain: shop });
+
+        // If no merchant yet, return none
+        if (!merchant) return res.json({ plan: 'none', status: 'none' });
+        // Return current plan and active status
         res.json({
-            plan: merchant?.plan || 'free',
-            status: merchant?.billingStatus || 'inactive'
+            plan: merchant.plan || 'free',
+            status: merchant.billingStatus || 'none'
         });
     } catch (error) {
-        res.status(500).json({ message: "Error fetching status" });
+        res.status(500).json({ error: 'Failed to fetch status' });
     }
 });
 

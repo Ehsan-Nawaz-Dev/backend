@@ -161,96 +161,8 @@ router.get("/callback", async (req, res) => {
       }
     }
 
-    // 4. Create Default Templates (for new merchants only)
-    if (isNewMerchant) {
-      const defaultTemplates = [
-        {
-          merchant: merchant._id,
-          name: "Order Confirmation",
-          event: "orders/create",
-          message: `Hi {{customer_name}}! 👋
-
-Thank you for your order from {{store_name}}!
-
-📦 *Order:* {{order_number}}
-🛒 *Items:* {{items_list}}
-💰 *Total:* {{grand_total}}
-📍 *Address:* {{address}}, {{city}}
-
-Please confirm if these details are correct.`,
-          enabled: true,
-          isPoll: true,
-          pollOptions: ["✅ Yes, Confirm", "❌ No, Cancel"]
-        },
-        {
-          merchant: merchant._id,
-          name: "Order Cancelled",
-          event: "orders/cancelled",
-          message: `Hi {{customer_name}},
-
-Your order {{order_number}} has been cancelled.
-
-If this was a mistake, please contact us.
-
-Thank you for shopping with {{store_name}}!`,
-          enabled: true,
-          isPoll: false
-        },
-        {
-          merchant: merchant._id,
-          name: "Shipment Update",
-          event: "fulfillments/update",
-          message: `Hi {{customer_name}}! 🚚
-
-Great news! Your order {{order_number}} has been shipped!
-
-📍 Track your package: {{tracking_link}}
-
-Thank you for shopping with {{store_name}}!`,
-          enabled: true,
-          isPoll: false
-        },
-        {
-          merchant: merchant._id,
-          name: "Admin Order Alert",
-          event: "admin-order-alert",
-          message: `🔔 *New Order Alert!*
-
-Order: {{order_number}}
-Customer: {{customer_name}}
-Total: {{grand_total}}
-Items: {{items_list}}
-Address: {{address}}, {{city}}`,
-          enabled: true,
-          isPoll: false
-        }
-      ];
-
-      for (const template of defaultTemplates) {
-        await Template.findOneAndUpdate(
-          { merchant: merchant._id, event: template.event },
-          template,
-          { upsert: true, new: true }
-        );
-      }
-      console.log(`[OAuth] Default templates created for ${shop}`);
-    }
-
-    // 5. Create Default Automation Settings
-    const defaultAutomations = [
-      { shopDomain: shop, type: "order-confirmation", enabled: true },
-      { shopDomain: shop, type: "abandoned-cart", enabled: false },
-      { shopDomain: shop, type: "shipment-update", enabled: true }
-    ];
-
-    for (const automation of defaultAutomations) {
-      await AutomationSetting.findOneAndUpdate(
-        { shopDomain: shop, type: automation.type },
-        automation,
-        { upsert: true }
-      );
-    }
-    console.log(`[OAuth] Automation settings configured for ${shop}`);
+    // 4. Seeding Default Data for a consistent merchant experience
+    await seedMerchantData(merchant);
 
     console.log(`[OAuth] ✅ Automatic setup COMPLETE for ${shop}`);
 
@@ -262,6 +174,82 @@ Address: {{address}}, {{city}}`,
     res.status(500).send("Installation failed. Please try again.");
   }
 });
+
+/**
+ * Function to seed default templates and automation settings for a merchant.
+ * Ensures data is available immediately after installation.
+ */
+async function seedMerchantData(merchant) {
+  const shopDomain = merchant.shopDomain;
+
+  // 1. Create Default Templates
+  const defaultTemplates = [
+    {
+      merchant: merchant._id,
+      name: "Order Confirmation",
+      event: "orders/create",
+      message: `Hi {{customer_name}}! 👋\n\nThank you for your order from {{store_name}}!\n\n📦 *Order:* {{order_number}}\n🛒 *Items:* {{items_list}}\n💰 *Total:* {{grand_total}}\n📍 *Address:* {{address}}, {{city}}\n\nPlease confirm if these details are correct.`,
+      enabled: true,
+      isPoll: true,
+      pollOptions: ["✅ Yes, Confirm", "❌ No, Cancel"]
+    },
+    {
+      merchant: merchant._id,
+      name: "Order Cancelled",
+      event: "orders/cancelled",
+      message: `Hi {{customer_name}},\n\nYour order {{order_number}} has been cancelled.\n\nIf this was a mistake, please contact us.\n\nThank you for shopping with {{store_name}}!`,
+      enabled: true,
+      isPoll: false
+    },
+    {
+      merchant: merchant._id,
+      name: "Shipment Update",
+      event: "fulfillments/update",
+      message: `Hi {{customer_name}}! 🚚\n\nGreat news! Your order {{order_number}} has been shipped!\n\n📍 Track your package: {{tracking_link}}\n\nThank you for shopping with {{store_name}}!`,
+      enabled: true,
+      isPoll: false
+    },
+    {
+      merchant: merchant._id,
+      name: "Cart Recovery",
+      event: "checkouts/create",
+      message: `Hi {{customer_name}}, you left something in your cart! 🛒\n\nClick here to finish your purchase: {{cart_link}}\n\nThank you for visiting {{store_name}}!`,
+      enabled: true,
+      isPoll: false
+    },
+    {
+      merchant: merchant._id,
+      name: "Admin Order Alert",
+      event: "admin-order-alert",
+      message: `🔔 *New Order Alert!*\n\nOrder: {{order_number}}\nCustomer: {{customer_name}}\nTotal: {{grand_total}}\nItems: {{items_list}}\nAddress: {{address}}, {{city}}`,
+      enabled: true,
+      isPoll: false
+    }
+  ];
+
+  for (const template of defaultTemplates) {
+    await Template.updateOne(
+      { merchant: merchant._id, event: template.event },
+      { $setOnInsert: template },
+      { upsert: true }
+    );
+  }
+
+  // 2. Create Default Automation Settings
+  const defaultAutomations = [
+    { shopDomain: shopDomain, type: "order-confirmation", enabled: true },
+    { shopDomain: shopDomain, type: "abandoned-cart", enabled: false },
+    { shopDomain: shopDomain, type: "shipment-update", enabled: true }
+  ];
+
+  for (const automation of defaultAutomations) {
+    await AutomationSetting.updateOne(
+      { shopDomain: shopDomain, type: automation.type },
+      { $setOnInsert: automation },
+      { upsert: true }
+    );
+  }
+}
 
 // Handle app uninstall webhook
 router.post("/uninstall", async (req, res) => {

@@ -292,6 +292,19 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     } else if (topic === "orders/paid") {
         const revenue = parseFloat(req.body?.total_price || 0);
         await automationService.trackRecovered(shopDomain, revenue);
+    } else if (topic === "app/uninstalled") {
+        await Merchant.findOneAndUpdate(
+            { shopDomain },
+            {
+                isActive: false,
+                shopifyAccessToken: null,
+                uninstalledAt: new Date()
+            }
+        );
+        console.log(`[ShopifyWebhook] App UNINSTALLED for ${shopDomain}. Merchant marked inactive.`);
+    } else if (topic === "checkouts/create") {
+        console.log(`[ShopifyWebhook] Checkout created for ${shopDomain}.`);
+        // Optional: Trigger abandoned cart logic here or via checkouts/abandoned
     }
 
     res.status(200).send("ok");
