@@ -50,6 +50,9 @@ const verifyShopifyWebhook = (req, res, next) => {
     if (hash === hmac) {
         next();
     } else {
+        console.error(`[ShopifyWebhook] HMAC validation FAILED for shop: ${req.headers["x-shopify-shop-domain"]}`);
+        console.error(`[ShopifyWebhook] Expected: ${hash}`);
+        console.error(`[ShopifyWebhook] Received: ${hmac}`);
         res.status(401).send("HMAC validation failed");
     }
 };
