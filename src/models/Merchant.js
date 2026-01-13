@@ -31,6 +31,10 @@ const MerchantSchema = new mongoose.Schema(
     defaultCountry: { type: String },
     language: { type: String },
 
+    // Billing Status
+    plan: { type: String, default: 'free' },
+    billingStatus: { type: String, default: 'inactive' },
+
     // Status
     isActive: { type: Boolean, default: true },
     installedAt: { type: Date },

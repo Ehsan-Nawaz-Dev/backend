@@ -14,6 +14,7 @@ import qrcodeRouter from "./qrcode.js";
 import automationsRouter from "./automations.js";
 import campaignsRouter from "./campaigns.js";
 import diagnosticsRouter from "./diagnostics.js";
+import billingRouter from "./billing.js";
 
 const router = Router();
 
@@ -112,6 +113,11 @@ router.get("/", (req, res) => {
                 basePath: "/api/campaigns",
                 description: "Bulk marketing campaign management",
                 methods: ["POST", "GET"]
+            },
+            billing: {
+                basePath: "/api/billing",
+                description: "Subscription and billing management with Shopify",
+                methods: ["GET", "POST"]
             }
         },
         documentation: {
@@ -136,5 +142,6 @@ router.use("/qrcode", qrcodeRouter);
 router.use("/automations", automationsRouter);
 router.use("/campaigns", campaignsRouter);
 router.use("/diagnostics", diagnosticsRouter);
+router.use("/billing", billingRouter);
 
 export default router;

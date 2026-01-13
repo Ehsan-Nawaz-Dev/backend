@@ -163,10 +163,13 @@ class WhatsAppService {
                 for (const msg of m.messages) {
                     if (!msg.message || msg.key.fromMe) continue;
 
-                    const from = msg.key.remoteJid.split("@")[0];
+                    // Refined source extraction: handle device IDs like 1234567:1@s.whatsapp.net
+                    const fullJid = msg.key.remoteJid;
+                    const fromRaw = fullJid.split("@")[0].split(":")[0];
+                    const fromCleaner = fromRaw.replace(/\D/g, ""); // "144332409569460"
                     const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
 
-                    console.log(`Incoming message from ${from} (${shopDomain}): ${text}`);
+                    console.log(`[Interaction] Incoming from ${fromRaw} (${shopDomain}): "${text}"`);
 
                     try {
                         const { Merchant } = await import("../models/Merchant.js");
@@ -174,14 +177,17 @@ class WhatsAppService {
                         const { shopifyService } = await import("./shopifyService.js");
 
                         const merchant = await Merchant.findOne({ shopDomain });
-                        if (!merchant || !merchant.shopifyAccessToken) continue;
+                        if (!merchant || !merchant.shopifyAccessToken) {
+                            console.warn(`[Interaction] No merchant/token found for ${shopDomain}`);
+                            continue;
+                        }
 
                         let activityStatus = null;
                         let tagToAdd = null;
 
                         // 1. Detect Poll Response (Baileys poll update)
                         if (msg.message?.pollUpdateMessage) {
-                            // Conceptual logic: default to confirm if interaction happens
+                            console.log(`[Interaction] Poll response detected from ${fromRaw}`);
                             activityStatus = "confirmed";
                             tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
                         } else {
@@ -197,14 +203,17 @@ class WhatsAppService {
                         }
 
                         if (activityStatus && tagToAdd) {
-                            // Find the most recent "confirmed" (pending) log to link this reply
+                            console.log(`[Interaction] Matched intent: ${activityStatus}. Looking for recent ActivityLog...`);
+
+                            // Match using last 10 digits as a safer fallback for varying international formats
+                            const phoneSuffix = fromCleaner.slice(-10);
                             const log = await ActivityLog.findOne({
                                 merchant: merchant._id,
-                                customerPhone: new RegExp(from.slice(-10))
+                                customerPhone: new RegExp(phoneSuffix + "$")
                             }).sort({ createdAt: -1 });
 
                             if (log && log.orderId) {
-                                console.log(`Linking ${activityStatus} reply from ${from} to Order ${log.orderId}`);
+                                console.log(`[Interaction] SUCCESS: Linking ${activityStatus} reply to Order ${log.orderId} (Log ID: ${log._id})`);
 
                                 const isConfirm = activityStatus === "confirmed";
                                 const tagsToRemove = isConfirm
@@ -223,7 +232,7 @@ class WhatsAppService {
                                 const replyText = isConfirm
                                     ? (merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅")
                                     : (merchant.orderCancelReply || "Your order has been cancelled. ❌");
-                                await this.sendMessage(shopDomain, from, replyText);
+                                await this.sendMessage(shopDomain, fromRaw, replyText);
 
                                 // Trigger Admin Alert (2s delay for demo, only if confirmed)
                                 if (isConfirm) {
@@ -247,13 +256,15 @@ class WhatsAppService {
                                             }
                                         }
                                     } catch (adminErr) {
-                                        console.error("Error triggering admin alert:", adminErr);
+                                        console.error("[Interaction] Admin alert error:", adminErr);
                                     }
                                 }
+                            } else {
+                                console.warn(`[Interaction] FAIL: No matching ActivityLog found for suffix ${phoneSuffix}`);
                             }
                         }
                     } catch (err) {
-                        console.error(`Error handling WhatsApp interaction from ${from}:`, err);
+                        console.error(`[Interaction] CRITICAL ERROR for ${fromRaw}:`, err);
                     }
                 }
             });
