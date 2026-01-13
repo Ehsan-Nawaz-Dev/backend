@@ -15,25 +15,9 @@ class CampaignService {
             const contact = contacts[i];
 
             // Wait before sending if not the first message
+            // Wait reduced for demo
             if (i > 0) {
-                // Determine base delay: 2nd message ~60s, 3rd message ~90s, then randomized
-                // User requested: 1 min for 2nd, 1.5 min for 3rd, and random [1m, 1.5m]
-                let baseDelay;
-                if (i === 1) {
-                    baseDelay = 60000; // 1 minute for the 2nd message
-                } else if (i === 2) {
-                    baseDelay = 90000; // 1.5 minutes for the 3rd message
-                } else {
-                    // Randomize between 60s and 90s for subsequent messages
-                    baseDelay = Math.floor(Math.random() * (90000 - 60000 + 1)) + 60000;
-                }
-
-                // Add a small random jitter (+/- 5 seconds) to avoid exact timing detection
-                const jitter = (Math.random() * 10000) - 5000;
-                const finalDelay = Math.max(60000, Math.min(90000, baseDelay + jitter));
-
-                console.log(`Campaign ${campaignId}: Waiting ${Math.round(finalDelay / 1000)} seconds before sending to ${contact.phone} (Message ${i + 1}/${contacts.length})`);
-                await WhatsAppService.delay(finalDelay);
+                await WhatsAppService.delay(1000); // 1 second between messages for demo
             }
 
             try {

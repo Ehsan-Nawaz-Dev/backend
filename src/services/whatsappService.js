@@ -112,10 +112,17 @@ class WhatsAppService {
                         console.log(`Attempting reconnect for ${shopDomain} in 10 seconds...`);
                         setTimeout(() => this.initializeClient(shopDomain), 10000);
                     }
+
+                    // 4. Notify Frontend of disconnection
+                    if (this.io) {
+                        const fullStatus = await this.getConnectionStatus(shopDomain);
+                        this.io.to(shopDomain).emit("status_update", fullStatus);
+                    }
                 } else if (connection === "open") {
                     console.log(`WhatsApp socket ready for ${shopDomain}`);
                     const user = sock.user.id.split(":")[0];
 
+                    // 1. Update WhatsApp Session
                     await WhatsAppSession.findOneAndUpdate(
                         { shopDomain },
                         {
@@ -128,7 +135,21 @@ class WhatsAppService {
                         }
                     );
 
+                    // 2. Sync with Merchant record
+                    try {
+                        const { Merchant } = await import("../models/Merchant.js");
+                        await Merchant.findOneAndUpdate(
+                            { shopDomain },
+                            { whatsappNumber: user }
+                        );
+                    } catch (merchErr) {
+                        console.error("Error updating merchant whatsappNumber:", merchErr);
+                    }
+
+                    // 3. Notify Frontend
                     if (this.io) {
+                        const fullStatus = await this.getConnectionStatus(shopDomain);
+                        this.io.to(shopDomain).emit("status_update", fullStatus);
                         this.io.to(shopDomain).emit("connected", { phoneNumber: user });
                     }
                 }
@@ -147,103 +168,44 @@ class WhatsAppService {
 
                     console.log(`Incoming message from ${from} (${shopDomain}): ${text}`);
 
-                    // 1. Detect Poll Response (Baileys poll update)
-                    if (msg.message?.pollUpdateMessage) {
-                        try {
-                            const { Merchant } = await import("../models/Merchant.js");
-                            const { ActivityLog } = await import("../models/ActivityLog.js");
-                            const { shopifyService } = await import("./shopifyService.js");
+                    try {
+                        const { Merchant } = await import("../models/Merchant.js");
+                        const { ActivityLog } = await import("../models/ActivityLog.js");
+                        const { shopifyService } = await import("./shopifyService.js");
 
-                            const merchant = await Merchant.findOne({ shopDomain });
-                            if (!merchant || !merchant.shopifyAccessToken) continue;
+                        const merchant = await Merchant.findOne({ shopDomain });
+                        if (!merchant || !merchant.shopifyAccessToken) continue;
 
-                            // In Baileys, poll updates are complex (they contain hashes).
-                            // For now, we follow the user's conceptual logic by attempting to find the vote.
-                            // NOTE: Proper decryption usually requires tracking the original poll creation message.
+                        let activityStatus = null;
+                        let tagToAdd = null;
 
-                            // Since we want to use the user's settings for replies:
-                            const log = await ActivityLog.findOne({
-                                merchant: merchant._id,
-                                customerPhone: new RegExp(from.slice(-10)),
-                                type: "confirmed"
-                            }).sort({ createdAt: -1 });
-
-                            if (log && log.orderId) {
-                                // Default to confirm for now if we can't perfectly distinguish vote without keys,
-                                // or better, we check if the user provided pseudo-logic we can match.
-                                // If they select 'Yes', use orderConfirmReply.
-                                const replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
-                                const tagsToRemove = [merchant.pendingConfirmTag, merchant.orderCancelTag];
-                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, merchant.orderConfirmTag || "Order Confirmed", tagsToRemove);
-
-                                // 1. Delay 60s before Admin Alert (As requested)
-                                await WhatsAppService.delay(60000);
-
-                                // TRIGGER ADMIN ALERT
-                                try {
-                                    const { AutomationSetting } = await import("../models/AutomationSetting.js");
-                                    const { Template } = await import("../models/Template.js");
-                                    const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
-                                    if (adminSetting?.enabled && merchant.adminPhoneNumber) {
-                                        const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
-                                        if (adminTemplate) {
-                                            const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
-                                            if (orderData) {
-                                                const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
-                                                const { automationService } = await import("./automationService.js");
-                                                let adminMsg = replacePlaceholders(adminTemplate.message, { order: orderData, merchant });
-                                                await this.sendMessage(shopDomain, merchant.adminPhoneNumber, adminMsg);
-                                                await automationService.trackSent(shopDomain, "admin-order-alert");
-                                            }
-                                        }
-                                    }
-                                } catch (adminErr) {
-                                    console.error("Error triggering admin alert from poll vote:", adminErr);
-                                }
-
-                                // 2. Delay 80s for Customer Reply (As requested: 80s after admin)
-                                await WhatsAppService.delay(80000);
-                                await this.sendMessage(shopDomain, from, replyText);
-
-                                log.message = `Customer voted on poll 📊`;
-                                await log.save();
+                        // 1. Detect Poll Response (Baileys poll update)
+                        if (msg.message?.pollUpdateMessage) {
+                            // Conceptual logic: default to confirm if interaction happens
+                            activityStatus = "confirmed";
+                            tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+                        } else {
+                            // 2. Basic Keyword Detection (Text messages)
+                            const input = text.toLowerCase().trim();
+                            if (input.includes("confirm") || input.includes("yes") || input.includes("theek")) {
+                                activityStatus = "confirmed";
+                                tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+                            } else if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi")) {
+                                activityStatus = "cancelled";
+                                tagToAdd = merchant.orderCancelTag || "Order Cancelled";
                             }
-                        } catch (err) {
-                            console.error(`Error handling poll update from ${from}:`, err);
                         }
-                    }
-                    // 2. Basic Keyword Detection for Confirm/Reject (Text messages)
-                    const input = text.toLowerCase().trim();
-                    let tagToAdd = null;
-                    let activityStatus = null;
 
-                    if (input.includes("confirm") || input.includes("yes") || input.includes("theek")) {
-                        tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
-                        activityStatus = "confirmed";
-                    } else if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi")) {
-                        tagToAdd = merchant.orderCancelTag || "Order Cancelled";
-                        activityStatus = "cancelled";
-                    }
-
-                    if (tagToAdd) {
-                        try {
-                            // 1. Find the Merchant to get Shopify Token
-                            const { Merchant } = await import("../models/Merchant.js");
-                            const { ActivityLog } = await import("../models/ActivityLog.js");
-                            const { shopifyService } = await import("./shopifyService.js");
-
-                            const merchant = await Merchant.findOne({ shopDomain });
-                            if (!merchant || !merchant.shopifyAccessToken) continue;
-
-                            // 2. Find the most recent ActivityLog for this phone number to get orderId
+                        if (activityStatus && tagToAdd) {
+                            // Find the most recent "confirmed" (pending) log to link this reply
                             const log = await ActivityLog.findOne({
                                 merchant: merchant._id,
-                                customerPhone: new RegExp(from.slice(-10)),
-                                type: "confirmed"
+                                customerPhone: new RegExp(from.slice(-10))
                             }).sort({ createdAt: -1 });
 
                             if (log && log.orderId) {
-                                console.log(`Linking reply from ${from} to Shopify Order ${log.orderId}`);
+                                console.log(`Linking ${activityStatus} reply from ${from} to Order ${log.orderId}`);
+
                                 const isConfirm = activityStatus === "confirmed";
                                 const tagsToRemove = isConfirm
                                     ? [merchant.pendingConfirmTag, merchant.orderCancelTag]
@@ -251,22 +213,26 @@ class WhatsAppService {
 
                                 await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
 
-                                // Optional: Update activity message
+                                // Update activity log
                                 log.message = `Customer replied: ${tagToAdd} 💬`;
-                                if (activityStatus === "cancelled") {
-                                    log.type = "cancelled";
-                                }
+                                log.type = activityStatus;
                                 await log.save();
 
-                                // TRIGGER ADMIN ALERT (ONLY IF CONFIRMED)
-                                if (activityStatus === "confirmed") {
-                                    // 1. Wait 60s before Admin Alert
-                                    await WhatsAppService.delay(60000);
+                                // Send Customer Reply (2s delay for demo)
+                                await WhatsAppService.delay(2000);
+                                const replyText = isConfirm
+                                    ? (merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅")
+                                    : (merchant.orderCancelReply || "Your order has been cancelled. ❌");
+                                await this.sendMessage(shopDomain, from, replyText);
 
+                                // Trigger Admin Alert (2s delay for demo, only if confirmed)
+                                if (isConfirm) {
+                                    await WhatsAppService.delay(2000);
                                     try {
                                         const { AutomationSetting } = await import("../models/AutomationSetting.js");
                                         const { Template } = await import("../models/Template.js");
                                         const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
+
                                         if (adminSetting?.enabled && merchant.adminPhoneNumber) {
                                             const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
                                             if (adminTemplate) {
@@ -281,25 +247,13 @@ class WhatsAppService {
                                             }
                                         }
                                     } catch (adminErr) {
-                                        console.error("Error triggering admin alert from keyword:", adminErr);
+                                        console.error("Error triggering admin alert:", adminErr);
                                     }
-
-                                    // 2. Delay 80s for Customer Reply (As requested: 80s after admin)
-                                    await WhatsAppService.delay(80000);
                                 }
-
-                                // Use Configured Replies (SEND TO CUSTOMER LAST)
-                                let replyText = "";
-                                if (activityStatus === "confirmed") {
-                                    replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
-                                } else {
-                                    replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
-                                }
-                                await this.sendMessage(shopDomain, from, replyText);
                             }
-                        } catch (err) {
-                            console.error(`Error processing WhatsApp reply from ${from}:`, err);
                         }
+                    } catch (err) {
+                        console.error(`Error handling WhatsApp interaction from ${from}:`, err);
                     }
                 }
             });
