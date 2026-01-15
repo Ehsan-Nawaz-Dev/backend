@@ -76,7 +76,7 @@ router.get("/status", async (req, res) => {
             trialUsage: merchant.trialUsage,
             trialLimit: merchant.trialLimit,
             plan: merchant.plan,
-            billingStatus: merchant.billingStatus
+            status: merchant.billingStatus
         });
     } catch (err) {
         res.status(500).json({ error: "Error fetching trial status" });
