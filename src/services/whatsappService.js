@@ -232,11 +232,19 @@ class WhatsAppService {
 
                     // Refined source extraction: handle device IDs like 1234567:1@s.whatsapp.net
                     const fullJid = msg.key.remoteJid;
-                    const fromRaw = fullJid.split("@")[0].split(":")[0];
-                    const fromCleaner = fromRaw.replace(/\D/g, ""); // "144332409569460"
-                    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+                    const fromRaw = fullJid?.split("@")[0].split(":")[0] || "";
+                    const fromCleaner = fromRaw.replace(/\D/g, "");
 
-                    console.log(`[Interaction] Incoming from ${fromRaw} (${shopDomain}): "${text}"`);
+                    console.log(`[Interaction] Incoming from ${fromRaw} (${shopDomain})`);
+                    console.log(`[Interaction] Message keys: ${Object.keys(msg.message || {}).join(", ")}`);
+
+                    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+                    const isPollUpdate = !!msg.message.pollUpdateMessage;
+
+                    if (isPollUpdate) {
+                        console.log(`[Interaction] DETECTED POLL UPDATE from ${fromRaw}`);
+                        console.log(`[Interaction] Poll Update details:`, JSON.stringify(msg.message.pollUpdateMessage, null, 2));
+                    }
 
                     try {
                         const { Merchant } = await import("../models/Merchant.js");
@@ -253,14 +261,24 @@ class WhatsAppService {
                         let tagToAdd = null;
 
                         // 1. Detect Poll Response (Baileys poll update)
-                        if (msg.message?.pollUpdateMessage) {
-                            console.log(`[Interaction] Poll response detected from ${fromRaw}`);
+                        if (isPollUpdate) {
+                            console.log(`[Interaction] Processing as poll update for ${fromRaw}`);
+
+                            // Try to detect if it's a cancellation based on selection index if available
+                            // selectedOptions is an array of hashes. Normally the first option (index 0) is Confirm.
+                            const pollUpdate = msg.message.pollUpdateMessage;
+                            const vote = pollUpdate?.vote;
+
+                            // In many Baileys implementations, we can't see the text without decryption.
+                            // But we can check if it's a known 'Cancel' or 'No' keyword if it's a text reply.
+                            // Since this is a poll update, we default to confirmed unless we find a reason otherwise.
+
                             activityStatus = "confirmed";
                             tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
                         } else {
                             // 2. Basic Keyword Detection (Text messages)
                             const input = text.toLowerCase().trim();
-                            if (input.includes("confirm") || input.includes("yes") || input.includes("theek")) {
+                            if (input.includes("confirm") || input.includes("yes") || input.includes("theek") || input.includes("haan")) {
                                 activityStatus = "confirmed";
                                 tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
                             } else if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi")) {
@@ -272,27 +290,38 @@ class WhatsAppService {
                         if (activityStatus && tagToAdd) {
                             console.log(`[Interaction] Matched intent: ${activityStatus}. Looking for recent ActivityLog...`);
 
-                            // Match using last 10 digits as a safer fallback for varying international formats
-                            const phoneSuffix = fromCleaner.slice(-10);
+                            // Match using last 9 digits (even safer than 10 for some regions)
+                            const phoneSuffix = fromCleaner.slice(-9);
+                            console.log(`[Interaction] Searching ActivityLog for merchant ${merchant._id} and phone suffix ${phoneSuffix}`);
                             const log = await ActivityLog.findOne({
                                 merchant: merchant._id,
                                 customerPhone: new RegExp(phoneSuffix + "$")
                             }).sort({ createdAt: -1 });
 
+                            if (log) {
+                                console.log(`[Interaction] FOUND ActivityLog: ID=${log._id}, orderId=${log.orderId}, currentStatus=${log.type}`);
+                            } else {
+                                console.log(`[Interaction] NO ActivityLog found for phone suffix ${phoneSuffix}`);
+                            }
+
                             if (log && log.orderId) {
-                                console.log(`[Interaction] SUCCESS: Linking ${activityStatus} reply to Order ${log.orderId} (Log ID: ${log._id})`);
+                                console.log(`[Interaction] SUCCESS: Linking ${activityStatus} reply to Order ${log.orderId}`);
 
                                 const isConfirm = activityStatus === "confirmed";
                                 const tagsToRemove = isConfirm
                                     ? [merchant.pendingConfirmTag, merchant.orderCancelTag]
                                     : [merchant.pendingConfirmTag, merchant.orderConfirmTag];
 
-                                await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
+                                console.log(`[Interaction] Calling shopifyService.addOrderTag for ${log.orderId}...`);
+                                const tagResult = await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
+                                console.log(`[Interaction] Shopify Tagging Result:`, tagResult);
 
-                                // Update activity log
-                                log.message = `Customer replied: ${tagToAdd} 💬`;
-                                log.type = activityStatus;
-                                await log.save();
+                                if (tagResult.success) {
+                                    // Update activity log
+                                    log.message = `Customer replied via WhatsApp: ${tagToAdd} 💬`;
+                                    log.type = activityStatus;
+                                    await log.save();
+                                }
 
                                 // Send Customer Reply (2s delay for demo)
                                 await WhatsAppService.delay(2000);
