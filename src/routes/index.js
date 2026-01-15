@@ -15,6 +15,8 @@ import automationsRouter from "./automations.js";
 import campaignsRouter from "./campaigns.js";
 import diagnosticsRouter from "./diagnostics.js";
 import billingRouter from "./billing.js";
+import trialRouter from "./trial.js";
+
 
 const router = Router();
 
@@ -118,7 +120,13 @@ router.get("/", (req, res) => {
                 basePath: "/api/billing",
                 description: "Subscription and billing management with Shopify",
                 methods: ["GET", "POST"]
+            },
+            trial: {
+                basePath: "/api/trial",
+                description: "Internal 10-message trial system",
+                methods: ["GET", "POST"]
             }
+
         },
         documentation: {
             whatsappCloudAPI: "See WHATSAPP_CLOUD_API.md for WhatsApp Cloud API documentation",
@@ -143,5 +151,7 @@ router.use("/automations", automationsRouter);
 router.use("/campaigns", campaignsRouter);
 router.use("/diagnostics", diagnosticsRouter);
 router.use("/billing", billingRouter);
+router.use("/trial", trialRouter);
+
 
 export default router;

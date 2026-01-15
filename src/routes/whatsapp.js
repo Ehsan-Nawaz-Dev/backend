@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { whatsappService } from "../services/whatsappService.js";
+import { Merchant } from "../models/Merchant.js";
 
 const router = Router();
 
@@ -88,6 +89,16 @@ router.post("/send", async (req, res) => {
             return res.status(400).json({ error: "Missing phoneNumber or message" });
         }
 
+        const merchant = await Merchant.findOne({ shopDomain });
+        if (merchant && merchant.plan === 'trial') {
+            if (merchant.trialUsage >= (merchant.trialLimit || 10)) {
+                return res.status(403).json({
+                    success: false,
+                    error: "Trial limit reached (10 messages max). Please upgrade to a paid plan."
+                });
+            }
+        }
+
         let result;
         if (isPoll && pollOptions?.length > 0) {
             result = await whatsappService.sendPoll(shopDomain, phoneNumber, message, pollOptions);
@@ -96,6 +107,11 @@ router.post("/send", async (req, res) => {
         }
 
         if (result.success) {
+            // Increment trial usage
+            if (merchant && merchant.plan === 'trial') {
+                await Merchant.updateOne({ shopDomain }, { $inc: { trialUsage: 1 } });
+            }
+
             res.json({
                 success: true,
                 message: "Message sent successfully"
