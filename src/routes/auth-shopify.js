@@ -31,7 +31,8 @@ router.get("/", (req, res) => {
   }
 
   const redirectUri = `${SHOPIFY_APP_URL}/api/auth/shopify/callback`;
-  const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${SHOPIFY_SCOPES}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  // Add grant_options[]=per-user to force re-prompt when scopes change
+  const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${SHOPIFY_SCOPES}&redirect_uri=${encodeURIComponent(redirectUri)}&grant_options[]=per-user`;
 
   console.log(`[OAuth] Redirecting ${shop} to Shopify authorization...`);
   res.redirect(installUrl);
