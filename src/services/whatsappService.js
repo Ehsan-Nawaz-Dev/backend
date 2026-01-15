@@ -8,9 +8,8 @@ import makeWASocket, {
 import pino from "pino";
 import { WhatsAppSession } from "../models/WhatsAppSession.js";
 import qrcode from "qrcode";
-import fs from "fs";
-import path from "path";
-import os from "os";
+import { WhatsAppAuth } from "../models/WhatsAppAuth.js";
+import { initAuthCreds, BufferJSON, proto } from "@whiskeysockets/baileys";
 
 const logger = pino({ level: "info" });
 const SERVICE_VERSION = "1.0.2-diag"; // To verify deployment
@@ -30,6 +29,75 @@ class WhatsAppService {
         this.io = io;
     }
 
+    /**
+     * Custom MongoDB Auth State for Baileys
+     * Replaces useMultiFileAuthState to survive Cloud Run ephemeral filesystem
+     */
+    async useMongoDBAuthState(shopDomain) {
+        const writeData = async (data, type, id) => {
+            const json = JSON.parse(JSON.stringify(data, BufferJSON.replacer));
+            await WhatsAppAuth.findOneAndUpdate(
+                { shopDomain, dataType: type, id },
+                { data: json },
+                { upsert: true }
+            );
+        };
+
+        const readData = async (type, id) => {
+            try {
+                const res = await WhatsAppAuth.findOne({ shopDomain, dataType: type, id });
+                if (res && res.data) {
+                    return JSON.parse(JSON.stringify(res.data), BufferJSON.reviver);
+                }
+                return null;
+            } catch (error) {
+                return null;
+            }
+        };
+
+        const removeData = async (type, id) => {
+            await WhatsAppAuth.deleteOne({ shopDomain, dataType: type, id });
+        };
+
+        const creds = await readData('creds', 'main') || initAuthCreds();
+
+        return {
+            state: {
+                creds,
+                keys: {
+                    get: async (type, ids) => {
+                        const data = {};
+                        await Promise.all(
+                            ids.map(async (id) => {
+                                let value = await readData(type, id);
+                                if (type === 'app-state-sync-key' && value) {
+                                    value = proto.Message.AppStateSyncKeyData.fromObject(value);
+                                }
+                                data[id] = value;
+                            })
+                        );
+                        return data;
+                    },
+                    set: async (data) => {
+                        const tasks = [];
+                        for (const category in data) {
+                            for (const id in data[category]) {
+                                const value = data[category][id];
+                                if (value) {
+                                    tasks.push(writeData(value, category, id));
+                                } else {
+                                    tasks.push(removeData(category, id));
+                                }
+                            }
+                        }
+                        await Promise.all(tasks);
+                    }
+                }
+            },
+            saveCreds: () => writeData(creds, 'creds', 'main')
+        };
+    }
+
     async initializeClient(shopDomain) {
         try {
             // Close existing socket if any
@@ -45,8 +113,7 @@ class WhatsAppService {
                 this.sockets.delete(shopDomain);
             }
 
-            const authPath = path.join(process.cwd(), "whatsapp_auth", shopDomain);
-            const { state, saveCreds } = await useMultiFileAuthState(authPath);
+            const { state, saveCreds } = await this.useMongoDBAuthState(shopDomain);
             const { version } = await fetchLatestBaileysVersion();
 
             const sock = makeWASocket({
@@ -353,10 +420,7 @@ class WhatsAppService {
                 }
                 this.sockets.delete(shopDomain);
             }
-            const authPath = path.join(process.cwd(), "whatsapp_auth", shopDomain);
-            if (fs.existsSync(authPath)) {
-                fs.rmSync(authPath, { recursive: true, force: true });
-            }
+            await WhatsAppAuth.deleteMany({ shopDomain });
             await WhatsAppSession.findOneAndUpdate(
                 { shopDomain },
                 { isConnected: false, status: "disconnected", qrCode: null }
