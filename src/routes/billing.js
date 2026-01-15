@@ -28,31 +28,42 @@ router.post('/create', async (req, res) => {
             return res.status(403).json({ message: 'Shopify token missing. Please reinstall the app.' });
         }
 
-        // Diagnostics: Verify token works with a simple shop info fetch
+        // Diagnostics: Verify token works and check scopes
         try {
-            await axios.get(`https://${shop}/admin/api/2024-10/shop.json`, {
+            const scopeResponse = await axios.get(`https://${shop}/admin/oauth/access_scopes.json`, {
                 headers: { 'X-Shopify-Access-Token': merchant.shopifyAccessToken }
             });
-            console.log(`[Billing] Diagnostics: Token verified for ${shop}`);
+            const scopes = scopeResponse.data.access_scopes.map(s => s.handle);
+            console.log(`[Billing] Diagnostics: Active Scopes for ${shop}:`, scopes.join(", "));
+
+            if (scopes.includes('write_billing')) {
+                console.log(`[Billing] SUCCESS: 'write_billing' scope is present for ${shop}`);
+            } else {
+                console.warn(`[Billing] CRITICAL: 'write_billing' scope is MISSING for ${shop}. 403 Forbidden is expected until merchant re-authorizes.`);
+            }
         } catch (diagErr) {
-            console.error(`[Billing] Diagnostics: Token verification FAILED for ${shop}:`, diagErr.response?.data || diagErr.message);
+            console.error(`[Billing] Diagnostics verification FAILED for ${shop}:`, diagErr.response?.data || diagErr.message);
         }
 
         // 4. Create Charge
         const chargeData = {
             recurring_application_charge: {
                 name: `${plans[plan].name} Plan`,
-                price: plans[plan].price.toString(), // Ensure price is a string
+                price: plans[plan].price, // Reverting to Number
                 return_url: `${SHOPIFY_APP_URL}/api/billing/confirm?shop=${shop}&plan=${plan}`,
                 test: true
             }
         };
 
+        const apiVersion = "2025-01"; // Updated to modern stable version
+        const chargeUrl = `https://${shop}/admin/api/${apiVersion}/recurring_application_charges.json`;
+
+        console.log(`[Billing] URL: ${chargeUrl}`);
         console.log(`[Billing] Request Payload:`, JSON.stringify(chargeData));
         console.log(`[Billing] Sending request to Shopify...`);
 
         const response = await axios.post(
-            `https://${shop}/admin/api/2024-10/recurring_application_charges.json`,
+            chargeUrl,
             chargeData,
             {
                 headers: {
@@ -99,8 +110,9 @@ router.get('/confirm', async (req, res) => {
         }
 
         // Activate the charge
+        const apiVersion = "2025-01";
         await axios.post(
-            `https://${shop}/admin/api/2024-10/recurring_application_charges/${charge_id}/activate.json`,
+            `https://${shop}/admin/api/${apiVersion}/recurring_application_charges/${charge_id}/activate.json`,
             {},
             { headers: { 'X-Shopify-Access-Token': merchant.shopifyAccessToken } }
         );
