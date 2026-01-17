@@ -24,6 +24,38 @@ router.get("/", async (req, res) => {
     const responseRate = delivered > 0 ? Math.round((replies / delivered) * 100) : 0;
     const recoveryRate = abandonedCheckouts > 0 ? Math.round((recovered / abandonedCheckouts) * 100) : 0;
 
+    // Daily Aggregation for Bar Graph (Last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const dailyAggregation = await ActivityLog.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: sevenDaysAgo }
+        }
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { "_id": 1 } }
+    ]);
+
+    // Format for frontend (fill in zeros if needed)
+    const dailyStats = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const stat = dailyAggregation.find(a => a._id === dateStr);
+      dailyStats.push({
+        date: dateStr,
+        count: stat ? stat.count : 0
+      });
+    }
+
     res.json({
       messagesSent: totalMessages,
       recoveredCarts: recovered,
@@ -35,6 +67,7 @@ router.get("/", async (req, res) => {
       recoveryRate,
       cancelled,
       periodDays: 30,
+      dailyStats
     });
   } catch (err) {
     console.error("Error building analytics summary", err);
