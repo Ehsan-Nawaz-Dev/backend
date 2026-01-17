@@ -7,6 +7,7 @@ const MerchantSchema = new mongoose.Schema(
 
     // Auto-fetched from Shopify
     storeName: { type: String },
+    contactName: { type: String },
     email: { type: String },
     phone: { type: String },
     currency: { type: String, default: 'USD' },

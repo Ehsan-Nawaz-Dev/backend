@@ -100,6 +100,7 @@ router.get("/callback", async (req, res) => {
       shopDomain: shop,
       shopifyAccessToken: accessToken,
       storeName: shopData?.name || shop,
+      contactName: shopData?.shop_owner || null,
       email: shopData?.email || null,
       phone: shopData?.phone || null,
       currency: shopData?.currency || "USD",

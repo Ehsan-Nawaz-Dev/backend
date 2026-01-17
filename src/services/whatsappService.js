@@ -10,6 +10,7 @@ import { WhatsAppSession } from "../models/WhatsAppSession.js";
 import qrcode from "qrcode";
 import { WhatsAppAuth } from "../models/WhatsAppAuth.js";
 import { initAuthCreds, BufferJSON, proto } from "@whiskeysockets/baileys";
+import { Merchant } from "../models/Merchant.js";
 
 const logger = pino({ level: "info" });
 const SERVICE_VERSION = "1.0.2-diag"; // To verify deployment
@@ -492,6 +493,14 @@ class WhatsAppService {
     async sendMessage(shopDomain, phoneNumber, message) {
         try {
             console.log(`[WhatsApp] sendMessage called for ${shopDomain} to ${phoneNumber}`);
+
+            // Protection: Check if merchant is blocked
+            const merchant = await Merchant.findOne({ shopDomain });
+            if (merchant && merchant.isActive === false) {
+                console.warn(`[WhatsApp] Blocked attempt: ${shopDomain} is inactive.`);
+                return { success: false, error: "Operation blocked: Account is inactive." };
+            }
+
             const sock = this.sockets.get(shopDomain);
 
             if (!sock) {
@@ -519,6 +528,14 @@ class WhatsAppService {
     async sendPoll(shopDomain, phoneNumber, pollName, pollOptions) {
         try {
             console.log(`[WhatsApp] sendPoll called for ${shopDomain} to ${phoneNumber}`);
+
+            // Protection: Check if merchant is blocked
+            const merchant = await Merchant.findOne({ shopDomain });
+            if (merchant && merchant.isActive === false) {
+                console.warn(`[WhatsApp] Blocked poll attempt: ${shopDomain} is inactive.`);
+                return { success: false, error: "Operation blocked: Account is inactive." };
+            }
+
             const sock = this.sockets.get(shopDomain);
 
             if (!sock) {

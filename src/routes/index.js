@@ -16,6 +16,7 @@ import campaignsRouter from "./campaigns.js";
 import diagnosticsRouter from "./diagnostics.js";
 import billingRouter from "./billing.js";
 import trialRouter from "./trial.js";
+import adminRouter from "./admin.js";
 
 
 const router = Router();
@@ -152,6 +153,7 @@ router.use("/campaigns", campaignsRouter);
 router.use("/diagnostics", diagnosticsRouter);
 router.use("/billing", billingRouter);
 router.use("/trial", trialRouter);
+router.use("/admin", adminRouter);
 
 
 export default router;
