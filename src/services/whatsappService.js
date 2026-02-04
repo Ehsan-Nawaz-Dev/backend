@@ -326,9 +326,38 @@ class WhatsAppService {
 
                                 // Send Customer Reply (2s delay for demo)
                                 await WhatsAppService.delay(2000);
-                                const replyText = isConfirm
-                                    ? (merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅")
-                                    : (merchant.orderCancelReply || "Your order has been cancelled. ❌");
+
+                                let replyText;
+                                if (isConfirm) {
+                                    // Try to use the Post-Confirmation Reply template first
+                                    try {
+                                        const { Template } = await import("../models/Template.js");
+                                        const confirmTemplate = await Template.findOne({
+                                            merchant: merchant._id,
+                                            event: "orders/confirmed"
+                                        });
+
+                                        if (confirmTemplate) {
+                                            // Fetch order data for placeholder replacement
+                                            const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
+                                            if (orderData) {
+                                                const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
+                                                replyText = replacePlaceholders(confirmTemplate.message, { order: orderData, merchant });
+                                                console.log(`[Interaction] Using Post-Confirmation Reply template for ${log.orderId}`);
+                                            } else {
+                                                replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
+                                            }
+                                        } else {
+                                            replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
+                                        }
+                                    } catch (templateErr) {
+                                        console.error("[Interaction] Error loading confirmation template:", templateErr);
+                                        replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
+                                    }
+                                } else {
+                                    replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
+                                }
+
                                 await this.sendMessage(shopDomain, fromRaw, replyText);
 
                                 // Trigger Admin Alert (2s delay for demo, only if confirmed)
@@ -416,6 +445,18 @@ class WhatsAppService {
             }
 
             console.log(`Requesting pairing code for ${shopDomain} with number ${formattedNumber}`);
+
+            // Save the phone number to merchant record during pairing
+            try {
+                const { Merchant } = await import("../models/Merchant.js");
+                await Merchant.findOneAndUpdate(
+                    { shopDomain },
+                    { whatsappNumber: formattedNumber }
+                );
+                console.log(`Saved WhatsApp number ${formattedNumber} to merchant ${shopDomain}`);
+            } catch (merchErr) {
+                console.error("Error saving WhatsApp number during pairing:", merchErr);
+            }
 
             // Request pairing code directly
             // Note: Baileys might require a little time after init before requestPairingCode works reliably

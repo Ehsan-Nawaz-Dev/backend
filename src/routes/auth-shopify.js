@@ -108,8 +108,8 @@ router.get("/callback", async (req, res) => {
       country: shopData?.country_name || null,
       // Default settings (merchant can customize later)
       pendingConfirmTag: "Pending Confirmation",
-      orderConfirmTag: "Confirmed",
-      orderCancelTag: "Cancelled",
+      orderConfirmTag: "Order Confirmed",
+      orderCancelTag: "Order Cancel By customer",
       orderConfirmReply: "Thank you! Your order has been confirmed. ✅",
       orderCancelReply: "Your order has been cancelled. ❌",
       isActive: true,

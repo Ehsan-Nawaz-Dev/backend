@@ -21,8 +21,8 @@ const MerchantSchema = new mongoose.Schema(
 
     // Tag Settings
     pendingConfirmTag: { type: String, default: 'Pending Confirmation' },
-    orderConfirmTag: { type: String, default: 'Confirmed' },
-    orderCancelTag: { type: String, default: 'Cancelled' },
+    orderConfirmTag: { type: String, default: 'Order Confirmed' },
+    orderCancelTag: { type: String, default: 'Order Cancel By customer' },
 
     // Reply Messages
     orderConfirmReply: { type: String, default: 'Thank you! Your order has been confirmed. ✅' },
