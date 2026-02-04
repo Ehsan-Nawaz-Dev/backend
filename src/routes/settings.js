@@ -13,8 +13,31 @@ router.get("/", async (req, res) => {
     const shopDomain = getShopDomain(req);
     if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
 
-    const merchant = await Merchant.findOne({ shopDomain });
+    let merchant = await Merchant.findOne({ shopDomain });
     if (!merchant) return res.json(null);
+
+    // Auto-fetch Shopify data if storeName is missing
+    if (!merchant.storeName && merchant.shopifyAccessToken) {
+      try {
+        const axios = (await import("axios")).default;
+        const shopResponse = await axios.get(`https://${shopDomain}/admin/api/2023-10/shop.json`, {
+          headers: { "X-Shopify-Access-Token": merchant.shopifyAccessToken }
+        });
+        const shopData = shopResponse.data.shop;
+
+        // Update merchant with fresh Shopify data
+        merchant.storeName = shopData?.name || shopDomain;
+        merchant.phone = merchant.phone || shopData?.phone || null;
+        merchant.email = merchant.email || shopData?.email || null;
+        merchant.country = merchant.country || shopData?.country_name || null;
+        merchant.currency = merchant.currency || shopData?.currency || "USD";
+        await merchant.save();
+
+        console.log(`[Settings] Auto-fetched Shopify store name: ${merchant.storeName}`);
+      } catch (shopifyErr) {
+        console.warn("[Settings] Could not auto-fetch Shopify data:", shopifyErr.message);
+      }
+    }
 
     res.json(merchant);
   } catch (err) {
