@@ -106,7 +106,6 @@ router.get("/callback", async (req, res) => {
       currency: shopData?.currency || "USD",
       timezone: shopData?.iana_timezone || null,
       country: shopData?.country_name || null,
-      // Default settings (merchant can customize later)
       pendingConfirmTag: "Pending Confirmation",
       orderConfirmTag: "Order Confirmed",
       orderCancelTag: "Order Cancel By customer",
