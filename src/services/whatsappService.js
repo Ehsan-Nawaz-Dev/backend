@@ -291,18 +291,38 @@ class WhatsAppService {
                         if (activityStatus && tagToAdd) {
                             console.log(`[Interaction] Matched intent: ${activityStatus}. Looking for recent ActivityLog...`);
 
-                            // Match using last 9 digits (even safer than 10 for some regions)
-                            const phoneSuffix = fromCleaner.slice(-9);
-                            console.log(`[Interaction] Searching ActivityLog for merchant ${merchant._id} and phone suffix ${phoneSuffix}`);
-                            const log = await ActivityLog.findOne({
-                                merchant: merchant._id,
-                                customerPhone: new RegExp(phoneSuffix + "$")
-                            }).sort({ createdAt: -1 });
+                            let log = null;
+
+                            // Check if this is an LID format (poll responses often come from LID)
+                            const isLidFormat = fullJid?.includes('@lid');
+
+                            if (isLidFormat && isPollUpdate) {
+                                // For LID poll responses, find the most recent pending activity
+                                console.log(`[Interaction] LID detected, searching for most recent pending activity...`);
+                                log = await ActivityLog.findOne({
+                                    merchant: merchant._id,
+                                    type: { $in: ['pending', 'confirmed'] },
+                                    // Only look at recent activities (last 24 hours)
+                                    createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+                                }).sort({ createdAt: -1 });
+
+                                if (log) {
+                                    console.log(`[Interaction] FOUND via LID search: Activity for order ${log.orderId}`);
+                                }
+                            } else {
+                                // Normal phone number matching using last 9 digits
+                                const phoneSuffix = fromCleaner.slice(-9);
+                                console.log(`[Interaction] Searching ActivityLog for merchant ${merchant._id} and phone suffix ${phoneSuffix}`);
+                                log = await ActivityLog.findOne({
+                                    merchant: merchant._id,
+                                    customerPhone: new RegExp(phoneSuffix + "$")
+                                }).sort({ createdAt: -1 });
+                            }
 
                             if (log) {
                                 console.log(`[Interaction] FOUND ActivityLog: ID=${log._id}, orderId=${log.orderId}, currentStatus=${log.type}`);
                             } else {
-                                console.log(`[Interaction] NO ActivityLog found for phone suffix ${phoneSuffix}`);
+                                console.log(`[Interaction] NO ActivityLog found`);
                             }
 
                             if (log && log.orderId) {
