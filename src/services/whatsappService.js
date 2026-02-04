@@ -551,9 +551,9 @@ class WhatsAppService {
         };
     }
 
-    async sendMessage(shopDomain, phoneNumber, message) {
+    async sendMessage(shopDomain, phoneNumber, message, retryCount = 0) {
         try {
-            console.log(`[WhatsApp] sendMessage called for ${shopDomain} to ${phoneNumber}`);
+            console.log(`[WhatsApp] sendMessage called for ${shopDomain} to ${phoneNumber}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
 
             // Protection: Check if merchant is blocked
             const merchant = await Merchant.findOne({ shopDomain });
@@ -565,11 +565,24 @@ class WhatsAppService {
             const sock = this.sockets.get(shopDomain);
 
             if (!sock) {
+                // Try to reconnect if no socket
+                if (retryCount < 1) {
+                    console.log(`[WhatsApp] No socket, attempting to reconnect...`);
+                    await this.initializeClient(shopDomain);
+                    await WhatsAppService.delay(5000);
+                    return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
+                }
                 console.error(`[WhatsApp] No socket found for ${shopDomain}. Available sockets: ${Array.from(this.sockets.keys()).join(", ") || "none"}`);
                 return { success: false, error: "WhatsApp not connected - no socket" };
             }
 
             if (!sock.user) {
+                // Wait a bit if connection is initializing
+                if (retryCount < 1) {
+                    console.log(`[WhatsApp] Socket exists but not authenticated, waiting...`);
+                    await WhatsAppService.delay(5000);
+                    return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
+                }
                 console.error(`[WhatsApp] Socket exists but no user for ${shopDomain}. Connection might be initializing.`);
                 return { success: false, error: "WhatsApp not connected - not authenticated" };
             }
@@ -582,13 +595,21 @@ class WhatsAppService {
             return { success: true };
         } catch (error) {
             console.error(`[WhatsApp] Error sending message:`, error);
+
+            // Retry on connection errors
+            if (retryCount < 1 && (error.message?.includes('Connection Closed') || error.message?.includes('conflict'))) {
+                console.log(`[WhatsApp] Connection error, waiting 5s and retrying...`);
+                await WhatsAppService.delay(5000);
+                return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
+            }
+
             return { success: false, error: error.message };
         }
     }
 
-    async sendPoll(shopDomain, phoneNumber, pollName, pollOptions) {
+    async sendPoll(shopDomain, phoneNumber, pollName, pollOptions, retryCount = 0) {
         try {
-            console.log(`[WhatsApp] sendPoll called for ${shopDomain} to ${phoneNumber}`);
+            console.log(`[WhatsApp] sendPoll called for ${shopDomain} to ${phoneNumber}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
 
             // Protection: Check if merchant is blocked
             const merchant = await Merchant.findOne({ shopDomain });
@@ -600,11 +621,24 @@ class WhatsAppService {
             const sock = this.sockets.get(shopDomain);
 
             if (!sock) {
+                // Try to reconnect if no socket
+                if (retryCount < 1) {
+                    console.log(`[WhatsApp] No socket for poll, attempting to reconnect...`);
+                    await this.initializeClient(shopDomain);
+                    await WhatsAppService.delay(5000);
+                    return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, retryCount + 1);
+                }
                 console.error(`[WhatsApp] No socket found for ${shopDomain}. Available sockets: ${Array.from(this.sockets.keys()).join(", ") || "none"}`);
                 return { success: false, error: "WhatsApp not connected - no socket" };
             }
 
             if (!sock.user) {
+                // Wait a bit if connection is initializing
+                if (retryCount < 1) {
+                    console.log(`[WhatsApp] Socket exists but not authenticated for poll, waiting...`);
+                    await WhatsAppService.delay(5000);
+                    return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, retryCount + 1);
+                }
                 console.error(`[WhatsApp] Socket exists but no user for ${shopDomain}. Connection might be initializing.`);
                 return { success: false, error: "WhatsApp not connected - not authenticated" };
             }
@@ -623,6 +657,14 @@ class WhatsAppService {
             return { success: true };
         } catch (error) {
             console.error(`[WhatsApp] Error sending poll:`, error);
+
+            // Retry on connection errors
+            if (retryCount < 1 && (error.message?.includes('Connection Closed') || error.message?.includes('conflict'))) {
+                console.log(`[WhatsApp] Connection error for poll, waiting 5s and retrying...`);
+                await WhatsAppService.delay(5000);
+                return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, retryCount + 1);
+            }
+
             return { success: false, error: error.message };
         }
     }
