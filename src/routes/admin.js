@@ -2,6 +2,7 @@ import { Router } from "express";
 import { Merchant } from "../models/Merchant.js";
 import { ActivityLog } from "../models/ActivityLog.js";
 import { WhatsAppSession } from "../models/WhatsAppSession.js";
+import { Plan } from "../models/Plan.js";
 
 const router = Router();
 
@@ -10,12 +11,24 @@ router.get("/merchants", async (req, res) => {
     try {
         const merchants = await Merchant.find().sort({ createdAt: -1 }).lean();
         const sessions = await WhatsAppSession.find().lean();
+        const plans = await Plan.find().lean();
+
+        const planMap = plans.reduce((acc, p) => {
+            acc[p.id] = p.messageLimit;
+            return acc;
+        }, {});
 
         // Map sessions to merchants
         const enrichedMerchants = merchants.map(merchant => {
             const session = sessions.find(s => s.shopDomain === merchant.shopDomain);
+            // Limit is either trialLimit (for trial/new) or plan.messageLimit
+            const limit = merchant.plan === 'trial' || !merchant.plan || merchant.plan === 'none' || merchant.plan === 'free'
+                ? (merchant.trialLimit || 10)
+                : (planMap[merchant.plan] || 0);
+
             return {
                 ...merchant,
+                limit,
                 isConnected: session?.isConnected || false,
                 lastConnected: session?.lastConnected,
                 status: session?.status || 'disconnected'
@@ -108,6 +121,37 @@ router.post("/merchants/extend-trial", async (req, res) => {
         res.json({ success: true, newLimit: merchant.trialLimit });
     } catch (err) {
         res.status(500).json({ error: "Failed to extend trial" });
+    }
+});
+
+// GET /api/admin/stats - Get subscription analytics
+router.get("/stats", async (req, res) => {
+    try {
+        const merchants = await Merchant.find({ billingStatus: 'active' }).lean();
+        const plans = await Plan.find().lean();
+
+        const planMap = plans.reduce((acc, p) => {
+            acc[p.id] = p.price;
+            return acc;
+        }, {});
+
+        let totalEarnings = 0;
+        const planCounts = {};
+
+        merchants.forEach(m => {
+            const price = planMap[m.plan] || 0;
+            totalEarnings += price;
+            planCounts[m.plan] = (planCounts[m.plan] || 0) + 1;
+        });
+
+        res.json({
+            totalSubscribers: merchants.length,
+            totalMonthlyEarnings: totalEarnings,
+            planBreakdown: planCounts
+        });
+    } catch (err) {
+        console.error("Admin: Error fetching stats", err);
+        res.status(500).json({ error: "Failed to fetch stats" });
     }
 });
 
