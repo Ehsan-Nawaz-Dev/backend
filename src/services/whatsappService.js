@@ -613,7 +613,8 @@ class WhatsAppService {
 
             // Retry on connection errors
             if (retryCount < 1 && isConnectionError) {
-                console.log(`[WhatsApp] Connection error (${errorMsg}), waiting 5s and retrying...`);
+                console.log(`[WhatsApp] Connection error (${errorMsg}), attempting re-init and retry...`);
+                await this.initializeClient(shopDomain);
                 await WhatsAppService.delay(5000);
                 return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
             }
@@ -681,7 +682,8 @@ class WhatsAppService {
 
             // Retry on connection errors
             if (retryCount < 1 && isConnectionError) {
-                console.log(`[WhatsApp] Connection error for poll (${errorMsg}), waiting 5s and retrying...`);
+                console.log(`[WhatsApp] Connection error for poll (${errorMsg}), attempting re-init and retry...`);
+                await this.initializeClient(shopDomain);
                 await WhatsAppService.delay(5000);
                 return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, retryCount + 1);
             }
