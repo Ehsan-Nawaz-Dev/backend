@@ -19,6 +19,7 @@ class WhatsAppService {
     constructor() {
         this.sockets = new Map(); // shopDomain -> socket instance
         this.io = null; // Socket.io instance
+        this.sessionMessageCounts = new Map(); // shopDomain -> message count in session
     }
 
     // Helper for sleep/delay
@@ -31,9 +32,60 @@ class WhatsAppService {
      * Adds random invisible chars or slight variations like a trailing dot or space.
      */
     randomizeMessage(text) {
-        const variations = ["", " ", ".", "  ", "\u200B"]; // invisible zero-width space included
+        const variations = ["", " ", ".", "  ", "\u200B", "!", "...", "\u200C"]; // More natural variations
         const randomVar = variations[Math.floor(Math.random() * variations.length)];
-        return text + randomVar;
+
+        // 30% chance to add a natural filler at the end
+        const fillers = ["", "", "", "😊", "👍", "✅", "🙏"];
+        const maybeFiller = fillers[Math.floor(Math.random() * fillers.length)];
+
+        return text + randomVar + maybeFiller;
+    }
+
+    /**
+     * Simulates human typing speed based on message length.
+     * Average human types 40-60 words per minute (200-300 chars/min).
+     * This equals roughly 3-5 chars/second, or 200-330ms per character.
+     */
+    calculateTypingTime(message) {
+        const messageLength = message.length;
+        const charsPerSecond = 3 + Math.random() * 2; // 3-5 chars/sec
+        const typingTime = (messageLength / charsPerSecond) * 1000; // in ms
+
+        // Cap between 2 and 15 seconds
+        return Math.min(Math.max(typingTime, 2000), 15000);
+    }
+
+    /**
+     * Human "thinking" pause before starting to type.
+     * Returns a random delay between 1-4 seconds.
+     */
+    getThinkingPause() {
+        return Math.floor(Math.random() * 3000) + 1000; // 1-4 seconds
+    }
+
+    /**
+     * Progressive delay that increases as more messages are sent in current session.
+     * This mimics natural human fatigue/caution.
+     */
+    getProgressiveDelay(sessionMessageCount) {
+        // Base delay: 3-6 seconds
+        let baseDelay = Math.floor(Math.random() * 3000) + 3000;
+
+        // Add 500ms for every 10 messages sent
+        const fatigueDelay = Math.floor(sessionMessageCount / 10) * 500;
+
+        // Add random "distraction" delay (5% chance of 10-20 second pause)
+        const distractionChance = Math.random();
+        const distractionDelay = distractionChance < 0.05 ? Math.floor(Math.random() * 10000) + 10000 : 0;
+
+        const totalDelay = baseDelay + fatigueDelay + distractionDelay;
+
+        if (distractionDelay > 0) {
+            console.log(`[WhatsApp] 🧘 Taking a natural break (${distractionDelay}ms)...`);
+        }
+
+        return Math.min(totalDelay, 30000); // Cap at 30 seconds max
     }
 
     /**
@@ -658,15 +710,30 @@ class WhatsAppService {
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
             const safeMessage = this.randomizeMessage(message);
 
-            // 3. Human-like throttling (3-6s)
-            const randomDelay = Math.floor(Math.random() * 3000) + 3000;
-            console.log(`[WhatsApp] Throttling message to ${formattedNumber} for ${randomDelay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, randomDelay));
+            // 3. ADVANCED HUMAN SIMULATION
+            // Track session message count
+            const sessionCount = this.sessionMessageCounts.get(shopDomain) || 0;
+            this.sessionMessageCounts.set(shopDomain, sessionCount + 1);
+
+            // 3a. Thinking pause (human reads before replying)
+            const thinkingPause = this.getThinkingPause();
+            console.log(`[WhatsApp] 🤔 Thinking pause: ${thinkingPause}ms`);
+            await new Promise(resolve => setTimeout(resolve, thinkingPause));
+
+            // 3b. Typing simulation based on message length
+            const typingTime = this.calculateTypingTime(safeMessage);
+            console.log(`[WhatsApp] ⌨️  Typing simulation: ${typingTime}ms (${safeMessage.length} chars)`);
+            await new Promise(resolve => setTimeout(resolve, typingTime));
+
+            // 3c. Progressive delay (increases with session activity)
+            const progressiveDelay = this.getProgressiveDelay(sessionCount);
+            console.log(`[WhatsApp] ⏱️  Progressive delay: ${progressiveDelay}ms (session msg #${sessionCount + 1})`);
+            await new Promise(resolve => setTimeout(resolve, progressiveDelay));
 
             try {
-                console.log(`[WhatsApp] Sending message to ${formattedNumber}@s.whatsapp.net`);
+                console.log(`[WhatsApp] 📤 Sending message to ${formattedNumber}@s.whatsapp.net`);
                 await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, { text: safeMessage });
-                console.log(`[WhatsApp] Message sent successfully to ${formattedNumber}`);
+                console.log(`[WhatsApp] ✅ Message sent successfully to ${formattedNumber}`);
                 return { success: true };
             } catch (innerError) {
                 const statusCode = innerError.output?.statusCode || innerError.output?.payload?.statusCode;
