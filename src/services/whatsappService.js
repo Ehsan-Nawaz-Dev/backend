@@ -297,59 +297,63 @@ class WhatsAppService {
                             const isLidFormat = fullJid?.includes('@lid');
 
                             if (isLidFormat && isPollUpdate) {
-                                // For LID poll responses, find the most recent pending activity
-                                console.log(`[Interaction] LID detected, searching for most recent pending activity...`);
+                                // For LID poll responses, find the most recent pending activity for this merchant
+                                console.log(`[Interaction] LID poll detected (${fromRaw}), searching for most recent pending activity...`);
                                 log = await ActivityLog.findOne({
                                     merchant: merchant._id,
-                                    type: { $in: ['pending', 'confirmed'] },
-                                    // Only look at recent activities (last 24 hours)
-                                    createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+                                    type: "pending",
+                                    createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) } // Last 48 hours
                                 }).sort({ createdAt: -1 });
 
                                 if (log) {
-                                    console.log(`[Interaction] FOUND via LID search: Activity for order ${log.orderId}`);
+                                    console.log(`[Interaction] MATCHED LID poll to Order: ${log.orderId}`);
+                                } else {
+                                    // Fallback: search for ANY recent confirmed/pending log
+                                    log = await ActivityLog.findOne({
+                                        merchant: merchant._id,
+                                        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+                                    }).sort({ createdAt: -1 });
                                 }
                             } else {
                                 // Normal phone number matching using last 9 digits
                                 const phoneSuffix = fromCleaner.slice(-9);
-                                console.log(`[Interaction] Searching ActivityLog for merchant ${merchant._id} and phone suffix ${phoneSuffix}`);
-                                log = await ActivityLog.findOne({
-                                    merchant: merchant._id,
-                                    customerPhone: new RegExp(phoneSuffix + "$")
-                                }).sort({ createdAt: -1 });
-                            }
-
-                            if (log) {
-                                console.log(`[Interaction] FOUND ActivityLog: ID=${log._id}, orderId=${log.orderId}, currentStatus=${log.type}`);
-                            } else {
-                                console.log(`[Interaction] NO ActivityLog found`);
+                                if (phoneSuffix) {
+                                    console.log(`[Interaction] Searching ActivityLog for phone suffix ${phoneSuffix}`);
+                                    log = await ActivityLog.findOne({
+                                        merchant: merchant._id,
+                                        customerPhone: new RegExp(phoneSuffix + "$")
+                                    }).sort({ createdAt: -1 });
+                                }
                             }
 
                             if (log && log.orderId) {
-                                console.log(`[Interaction] SUCCESS: Linking ${activityStatus} reply to Order ${log.orderId}`);
+                                console.log(`[Interaction] SUCCESS: Found Order ${log.orderId}. Status: ${activityStatus}`);
 
                                 const isConfirm = activityStatus === "confirmed";
                                 const tagsToRemove = isConfirm
                                     ? [merchant.pendingConfirmTag, merchant.orderCancelTag]
                                     : [merchant.pendingConfirmTag, merchant.orderConfirmTag];
 
-                                console.log(`[Interaction] Calling shopifyService.addOrderTag for ${log.orderId}...`);
-                                const tagResult = await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
-                                console.log(`[Interaction] Shopify Tagging Result:`, tagResult);
+                                // 1. Attempt Shopify Tagging (Background)
+                                try {
+                                    console.log(`[Interaction] Calling shopifyService.addOrderTag for ${log.orderId}...`);
+                                    const tagResult = await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
+                                    console.log(`[Interaction] Tagging result success: ${tagResult.success}`);
 
-                                if (tagResult.success) {
-                                    // Update activity log
-                                    log.message = `Customer replied via WhatsApp: ${tagToAdd} 💬`;
-                                    log.type = activityStatus;
-                                    await log.save();
+                                    if (tagResult.success) {
+                                        log.message = `Customer confirmed via WhatsApp ✅`;
+                                        log.type = activityStatus;
+                                        await log.save();
+                                    }
+                                } catch (tagErr) {
+                                    console.error("[Interaction] Tagging Error (Continuing to reply):", tagErr.message);
                                 }
 
-                                // Send Customer Reply (2s delay for demo)
-                                await WhatsAppService.delay(2000);
+                                // 2. Send Customer Reply (Always send even if tagging fails)
+                                await WhatsAppService.delay(1000);
 
                                 let replyText;
                                 if (isConfirm) {
-                                    // Try to use the Post-Confirmation Reply template first
                                     try {
                                         const { Template } = await import("../models/Template.js");
                                         const confirmTemplate = await Template.findOne({
@@ -358,30 +362,28 @@ class WhatsAppService {
                                         });
 
                                         if (confirmTemplate) {
-                                            // Fetch order data for placeholder replacement
                                             const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
                                             if (orderData) {
                                                 const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
                                                 replyText = replacePlaceholders(confirmTemplate.message, { order: orderData, merchant });
-                                                console.log(`[Interaction] Using Post-Confirmation Reply template for ${log.orderId}`);
+                                                console.log(`[Interaction] Using Dynamic Template`);
                                             } else {
-                                                replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
+                                                replyText = merchant.orderConfirmReply || "Thank you! Order confirmed. ✅";
                                             }
                                         } else {
-                                            replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
+                                            replyText = merchant.orderConfirmReply || "Thank you! Order confirmed. ✅";
                                         }
-                                    } catch (templateErr) {
-                                        console.error("[Interaction] Error loading confirmation template:", templateErr);
-                                        replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
+                                    } catch (err) {
+                                        replyText = merchant.orderConfirmReply || "Thank you! Order confirmed. ✅";
                                     }
                                 } else {
-                                    replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
+                                    replyText = merchant.orderCancelReply || "Order cancelled as requested. ❌";
                                 }
 
-                                // IMPORTANT: Send to customer's actual phone number from ActivityLog, not LID
-                                const customerPhone = log.customerPhone || fromRaw;
-                                console.log(`[Interaction] Sending reply to customer: ${customerPhone}`);
-                                await this.sendMessage(shopDomain, customerPhone, replyText);
+                                // ALWAYS SEND TO REAL PHONE NUMBER, NOT LID
+                                const targetPhone = log.customerPhone || fromRaw;
+                                console.log(`[Interaction] Sending confirmation reply to: ${targetPhone}`);
+                                await this.sendMessage(shopDomain, targetPhone, replyText);
 
                                 // Trigger Admin Alert (2s delay for demo, only if confirmed)
                                 if (isConfirm) {
