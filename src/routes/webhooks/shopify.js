@@ -8,6 +8,7 @@ import { Template } from "../../models/Template.js";
 import { shopifyService } from "../../services/shopifyService.js";
 import crypto from "crypto";
 import { replacePlaceholders } from "../../utils/placeholderHelper.js";
+import { Plan } from "../../models/Plan.js";
 
 const router = Router();
 
