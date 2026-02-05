@@ -119,7 +119,7 @@ router.post("/merchants/cancel-subscription", async (req, res) => {
 
         const merchant = await Merchant.findOneAndUpdate(
             { shopDomain },
-            { billingStatus: 'inactive' },
+            { billingStatus: 'inactive', plan: 'none' },
             { new: true }
         );
 
