@@ -378,7 +378,10 @@ class WhatsAppService {
                                     replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
                                 }
 
-                                await this.sendMessage(shopDomain, fromRaw, replyText);
+                                // IMPORTANT: Send to customer's actual phone number from ActivityLog, not LID
+                                const customerPhone = log.customerPhone || fromRaw;
+                                console.log(`[Interaction] Sending reply to customer: ${customerPhone}`);
+                                await this.sendMessage(shopDomain, customerPhone, replyText);
 
                                 // Trigger Admin Alert (2s delay for demo, only if confirmed)
                                 if (isConfirm) {
@@ -406,7 +409,7 @@ class WhatsAppService {
                                     }
                                 }
                             } else {
-                                console.warn(`[Interaction] FAIL: No matching ActivityLog found for suffix ${phoneSuffix}`);
+                                console.warn(`[Interaction] FAIL: No matching ActivityLog found for incoming message from ${fromRaw}`);
                             }
                         }
                     } catch (err) {
