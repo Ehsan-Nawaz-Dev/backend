@@ -1,17 +1,22 @@
 export const plans = {
-    beginner: {
-        name: "Beginner",
-        price: 9.99,
-        features: ["100 Orders/mo", "Basic WhatsApp Templates"]
+    free: {
+        name: "Free",
+        price: 0,
+        messageLimit: 50
     },
-    intermediate: {
-        name: "Intermediate",
-        price: 29.99,
-        features: ["1,000 Orders/mo", "Advanced Templates", "Priority Support"]
+    starter: {
+        name: "Starter",
+        price: 4.99,
+        messageLimit: 1250
+    },
+    growth: {
+        name: "Growth",
+        price: 9.99,
+        messageLimit: 2500
     },
     pro: {
-        name: "Pro",
-        price: 59.99,
-        features: ["Unlimited Orders", "Custom Branding", "Dedicated Account Manager"]
+        name: "Professional",
+        price: 14.99,
+        messageLimit: 4250
     }
 };

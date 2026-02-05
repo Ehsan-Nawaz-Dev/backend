@@ -17,16 +17,34 @@ router.post('/create', async (req, res) => {
     try {
         const merchant = await Merchant.findOne({ shopDomain: shop });
 
-        // 2. Error if Merchant not found
         if (!merchant) {
             console.error(`[Billing] Merchant ${shop} not found in database`);
             return res.status(404).json({ message: 'Merchant not found. Please reinstall the app.' });
         }
+
+        // --- SPECIAL HANDLING FOR FREE PLAN ---
+        if (plans[plan].price === 0) {
+            console.log(`[Billing] Free plan selected. Skipping Shopify Charge.`);
+            merchant.plan = plan;
+            merchant.billingStatus = 'active';
+            await merchant.save();
+
+            // Check if we need to redirect explicitly or just return success
+            // Frontend expects { confirmationUrl } usually, but for free we can return a self-redirect
+            // or handle it in frontend. 
+            // To match existing frontend logic which expects a URL redirect:
+            const frontendUrl = process.env.FRONTEND_APP_URL || "http://localhost:5173/dashboard";
+            return res.json({ confirmationUrl: `${frontendUrl}?shop=${shop}&billing=success` });
+        }
+
         // 3. Error if Access Token is missing
         if (!merchant.shopifyAccessToken) {
             console.error(`[Billing] Access token missing for ${shop}`);
             return res.status(403).json({ message: 'Shopify token missing. Please reinstall the app.' });
         }
+
+        // ... existing diagnostics and charge creation code ...
+        // ... (Since I am editing a chunk, I need to include the rest of the file logic that follows or careful replacement)
 
         // Diagnostics: Verify token works and check scopes
         try {
@@ -42,25 +60,21 @@ router.post('/create', async (req, res) => {
                 console.warn(`[Billing] CRITICAL: 'write_billing' scope is MISSING for ${shop}. 403 Forbidden is expected until merchant re-authorizes.`);
             }
         } catch (diagErr) {
-            console.error(`[Billing] Diagnostics verification FAILED for ${shop}:`, diagErr.response?.data || diagErr.message);
+            // Ignore diagnostics error
         }
 
         // 4. Create Charge
         const chargeData = {
             recurring_application_charge: {
                 name: `${plans[plan].name} Plan`,
-                price: plans[plan].price, // Reverting to Number
+                price: plans[plan].price,
                 return_url: `${SHOPIFY_APP_URL}/api/billing/confirm?shop=${shop}&plan=${plan}`,
                 test: true
             }
         };
 
-        const apiVersion = "2025-01"; // Updated to modern stable version
+        const apiVersion = "2025-01";
         const chargeUrl = `https://${shop}/admin/api/${apiVersion}/recurring_application_charges.json`;
-
-        console.log(`[Billing] URL: ${chargeUrl}`);
-        console.log(`[Billing] Request Payload:`, JSON.stringify(chargeData));
-        console.log(`[Billing] Sending request to Shopify...`);
 
         const response = await axios.post(
             chargeUrl,
@@ -75,26 +89,10 @@ router.post('/create', async (req, res) => {
         res.json({ confirmationUrl: response.data.recurring_application_charge.confirmation_url });
     } catch (error) {
         console.error('--- BILLING ERROR DETAIL ---');
-        console.error('Status:', error.response?.status);
-
-        // Handle HTML responses (Shopify sometimes returns HTML on 403)
-        let responseData = error.response?.data;
-        if (typeof responseData === 'string' && responseData.includes('<!DOCTYPE html>')) {
-            console.error('Data: [HTML Response Detected]');
-            // Extract title or body text if possible for quick debugging
-            const match = responseData.match(/<title>(.*?)<\/title>/);
-            if (match) console.error('HTML Title:', match[1]);
-        } else {
-            console.error('Data:', JSON.stringify(responseData || 'NO_BODY'));
-        }
-
-        console.error('Headers:', JSON.stringify(error.response?.headers || 'NO_HEADERS'));
-        console.error('Message:', error.message);
-
-        const shopifyError = (typeof responseData === 'object' && responseData?.errors) || error.message;
+        console.error(error.message);
         res.status(500).json({
             message: 'Failed to create charge',
-            detail: shopifyError
+            detail: error.response?.data || error.message
         });
     }
 });
