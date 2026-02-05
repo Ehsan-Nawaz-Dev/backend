@@ -40,7 +40,7 @@ class ShopifyService {
             console.log(`[ShopifyService] Adding tag "${newTag}" to order ${numericOrderId} on ${shopDomain}`);
 
             // 1. Get current tags
-            const url = `https://${shopDomain}/admin/api/2023-10/orders/${numericOrderId}.json`;
+            const url = `https://${shopDomain}/admin/api/2024-01/orders/${numericOrderId}.json`;
             console.log(`[ShopifyService] GET ${url}`);
 
             const getResponse = await axios.get(url, {
@@ -106,7 +106,7 @@ class ShopifyService {
      */
     async getOrder(shopDomain, accessToken, orderId) {
         try {
-            const url = `https://${shopDomain}/admin/api/2023-10/orders/${orderId}.json`;
+            const url = `https://${shopDomain}/admin/api/2024-01/orders/${orderId}.json`;
             const response = await axios.get(url, {
                 headers: { "X-Shopify-Access-Token": accessToken }
             });
@@ -122,7 +122,7 @@ class ShopifyService {
      */
     async registerWebhook(shopDomain, accessToken, topic, callbackUrl) {
         try {
-            const url = `https://${shopDomain}/admin/api/2023-10/webhooks.json`;
+            const url = `https://${shopDomain}/admin/api/2024-01/webhooks.json`;
             const response = await axios.post(url, {
                 webhook: {
                     topic: topic,
