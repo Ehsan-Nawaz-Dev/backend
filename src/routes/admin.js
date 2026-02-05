@@ -111,4 +111,25 @@ router.post("/merchants/extend-trial", async (req, res) => {
     }
 });
 
+// POST /api/admin/merchants/cancel-subscription - Force cancel subscription
+router.post("/merchants/cancel-subscription", async (req, res) => {
+    try {
+        const { shopDomain } = req.body;
+        if (!shopDomain) return res.status(400).json({ error: "shopDomain is required" });
+
+        const merchant = await Merchant.findOneAndUpdate(
+            { shopDomain },
+            { billingStatus: 'inactive' },
+            { new: true }
+        );
+
+        if (!merchant) return res.status(404).json({ error: "Merchant not found" });
+
+        res.json({ success: true, merchant });
+    } catch (err) {
+        console.error("Admin: Error canceling subscription", err);
+        res.status(500).json({ error: "Failed to cancel subscription" });
+    }
+});
+
 export default router;

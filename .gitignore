@@ -16,7 +16,7 @@ pids/
 *.pid
 *.seed
 *.pid.lock
-
+*.env
 # WhatsApp session data
 .wwebjs_auth/
 .wwebjs_cache/
