@@ -43,6 +43,11 @@ const MerchantSchema = new mongoose.Schema(
     trialUsage: { type: Number, default: 0 },
     trialLimit: { type: Number, default: 10 },
 
+    // Daily Safety Limits
+    dailyLimit: { type: Number, default: 250 }, // Default safe-ish limit for unofficial connections
+    dailyUsage: { type: Number, default: 0 },
+    lastUsageDate: { type: String }, // Stored as YYYY-MM-DD
+
     // Status
     isActive: { type: Boolean, default: true },
     installedAt: { type: Date },

@@ -26,6 +26,50 @@ class WhatsAppService {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
+    /**
+     * Injects micro-variations into a message to avoid identical bulk message flags.
+     * Adds random invisible chars or slight variations like a trailing dot or space.
+     */
+    randomizeMessage(text) {
+        const variations = ["", " ", ".", "  ", "\u200B"]; // invisible zero-width space included
+        const randomVar = variations[Math.floor(Math.random() * variations.length)];
+        return text + randomVar;
+    }
+
+    /**
+     * Checks and increments daily usage for a merchant.
+     * Returns true if allowed, false if limit exceeded.
+     */
+    async checkDailyLimit(shopDomain) {
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const merchant = await Merchant.findOne({ shopDomain });
+
+            if (!merchant) return true; // Fail safe
+
+            if (merchant.lastUsageDate !== today) {
+                // Reset daily usage for new day
+                merchant.dailyUsage = 1;
+                merchant.lastUsageDate = today;
+                await merchant.save();
+                return true;
+            }
+
+            if (merchant.dailyUsage >= (merchant.dailyLimit || 250)) {
+                console.warn(`[WhatsApp] Daily limit reached for ${shopDomain} (${merchant.dailyUsage}/${merchant.dailyLimit})`);
+                return false;
+            }
+
+            // Increment usage
+            merchant.dailyUsage += 1;
+            await merchant.save();
+            return true;
+        } catch (err) {
+            console.error("Error checking daily limit:", err);
+            return true; // Don't block on DB errors
+        }
+    }
+
     setSocketIO(io) {
         this.io = io;
     }
@@ -548,6 +592,7 @@ class WhatsAppService {
 
     async getConnectionStatus(shopDomain) {
         const session = await WhatsAppSession.findOne({ shopDomain });
+        const merchant = await Merchant.findOne({ shopDomain });
         const sock = this.sockets.get(shopDomain);
         return {
             isConnected: !!(sock?.user),
@@ -557,6 +602,8 @@ class WhatsAppService {
             qrCode: session?.qrCode,
             lastConnected: session?.lastConnected,
             errorMessage: session?.errorMessage,
+            dailyUsage: merchant?.dailyUsage || 0,
+            dailyLimit: merchant?.dailyLimit || 250,
         };
     }
 
@@ -597,25 +644,50 @@ class WhatsAppService {
             }
 
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
+
+            // 1. Check daily safety limit (Unofficial Device only)
+            const canSend = await this.checkDailyLimit(shopDomain);
+            if (!canSend) {
+                return { success: false, error: "Daily safety limit reached for this number. Wait 24 hours or switch to WhatsApp Cloud API for unlimited sending." };
+            }
+
+            // 2. Randomize message slightly
+            const safeMessage = this.randomizeMessage(message);
+
+            // 3. Add a small human-like delay even for single messages (3 - 6 seconds for better safety)
+            const randomDelay = Math.floor(Math.random() * 3000) + 3000;
+            console.log(`[WhatsApp] Throttling message to ${formattedNumber} for ${randomDelay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, randomDelay));
+
             console.log(`[WhatsApp] Sending message to ${formattedNumber}@s.whatsapp.net`);
 
-            await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, { text: message });
+            await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, { text: safeMessage });
             console.log(`[WhatsApp] Message sent successfully to ${formattedNumber}`);
             return { success: true };
         } catch (error) {
             console.error(`[WhatsApp] Error sending message:`, error);
 
             // Check multiple error message locations (Baileys uses Boom errors)
+            const statusCode = error.output?.statusCode || error.output?.payload?.statusCode;
             const errorMsg = error.message || error.output?.payload?.message || '';
-            const isConnectionError = errorMsg.includes('Connection Closed') ||
+            const isConnectionError =
+                errorMsg.includes('Connection Closed') ||
+                errorMsg.includes('Connection Terminated') ||
                 errorMsg.includes('conflict') ||
+                statusCode === 428 ||
+                statusCode === 408 ||
                 error.isBoom;  // All Boom errors typically mean connection issues
 
             // Retry on connection errors
-            if (retryCount < 1 && isConnectionError) {
-                console.log(`[WhatsApp] Connection error (${errorMsg}), attempting re-init and retry...`);
+            if (retryCount < 2 && isConnectionError) {
+                console.log(`[WhatsApp] 🔄 Connection error detected (Status: ${statusCode}, Msg: ${errorMsg}). Attempting re-init and retry ${retryCount + 1}/2...`);
+
+                // IMPORTANT: We must wait for initializeClient to actually set the new socket
                 await this.initializeClient(shopDomain);
-                await WhatsAppService.delay(5000);
+
+                // Give it some time to actually start Connecting
+                await WhatsAppService.delay(7000);
+
                 return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
             }
 
@@ -660,6 +732,12 @@ class WhatsAppService {
             }
 
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
+
+            // Add a small human-like delay for polls (2 - 5 seconds)
+            const randomDelay = Math.floor(Math.random() * 3000) + 2000;
+            console.log(`[WhatsApp] Throttling poll for ${formattedNumber} for ${randomDelay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, randomDelay));
+
             console.log(`[WhatsApp] Sending poll to ${formattedNumber}@s.whatsapp.net with options:`, pollOptions);
 
             await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, {

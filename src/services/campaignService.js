@@ -14,10 +14,17 @@ class CampaignService {
         for (let i = 0; i < contacts.length; i++) {
             const contact = contacts[i];
 
-            // Wait before sending if not the first message
-            // Wait reduced for demo
+            // Safer delay for unofficial WhatsApp connection (10-25 seconds)
             if (i > 0) {
-                await WhatsAppService.delay(1000); // 1 second between messages for demo
+                // Mandatory batch break every 15 messages (3 minutes)
+                if (i % 15 === 0) {
+                    console.log(`[Campaign] Batch limit reached (${i}). Taking a 3-minute safety break...`);
+                    await new Promise(resolve => setTimeout(resolve, 180000));
+                }
+
+                const safeDelay = Math.floor(Math.random() * (25000 - 10000 + 1)) + 10000;
+                console.log(`[Campaign] Waiting ${safeDelay}ms before next message to avoid ban.`);
+                await new Promise(resolve => setTimeout(resolve, safeDelay));
             }
 
             try {

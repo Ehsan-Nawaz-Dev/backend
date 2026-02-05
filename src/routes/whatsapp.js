@@ -18,7 +18,9 @@ router.get("/status", async (req, res) => {
         res.json({
             connected: status.isConnected,
             phoneNumber: status.phoneNumber || "",
-            deviceName: status.deviceName || "Desktop"
+            deviceName: status.deviceName || "Desktop",
+            dailyUsage: status.dailyUsage,
+            dailyLimit: status.dailyLimit
         });
     } catch (err) {
         console.error("Error fetching WhatsApp status", err);
