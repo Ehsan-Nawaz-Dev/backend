@@ -17,7 +17,7 @@ import diagnosticsRouter from "./diagnostics.js";
 import billingRouter from "./billing.js";
 import trialRouter from "./trial.js";
 import adminRouter from "./admin.js";
-
+import storefrontRouter from "./storefront.js";
 
 const router = Router();
 
@@ -159,6 +159,6 @@ router.use("/billing", billingRouter);
 router.use("/plans", planRouter); // Register here
 router.use("/trial", trialRouter);
 router.use("/admin", adminRouter);
-
+router.use("/storefront", storefrontRouter);
 
 export default router;
