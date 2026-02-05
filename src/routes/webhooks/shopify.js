@@ -180,17 +180,19 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     customerMsg = replacePlaceholders(customerMsg, { order: fullOrderData, merchant: updatedMerchant });
                     console.log(`[ShopifyWebhook] Final message to send: ${customerMsg}`);
 
-                    // NEW: Trial Limit Check
-                    if (updatedMerchant.plan === 'trial') {
-                        if (updatedMerchant.trialUsage >= (updatedMerchant.trialLimit || 10)) {
-                            console.warn(`[ShopifyWebhook] Trial limit reached for ${shopDomain}. Message blocked.`);
-                            if (activity) {
-                                activity.type = 'failed';
-                                activity.message = 'Trial Limit Reached (10 messages max) 🛑';
-                                await activity.save();
-                            }
-                            return;
+                    // NEW: Usage & Plan Limit Check
+                    const planConfig = await Plan.findOne({ id: updatedMerchant.plan || 'free' });
+                    const currentLimit = planConfig ? planConfig.messageLimit : (updatedMerchant.trialLimit || 10);
+                    const currentUsage = updatedMerchant.usage || 0;
+
+                    if (currentUsage >= currentLimit) {
+                        console.warn(`[ShopifyWebhook] Message limit reached for ${shopDomain} (Plan: ${updatedMerchant.plan}). Message blocked.`);
+                        if (activity) {
+                            activity.type = 'failed';
+                            activity.message = `Limit Reached (${currentLimit} messages) 🛑`;
+                            await activity.save();
                         }
+                        return;
                     }
 
                     let result;
@@ -203,10 +205,8 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     console.log(`[ShopifyWebhook] WhatsApp send result:`, result);
 
                     if (result && result.success) {
-                        // Increment trial usage if applicable
-                        if (updatedMerchant.plan === 'trial') {
-                            await Merchant.updateOne({ shopDomain }, { $inc: { trialUsage: 1 } });
-                        }
+                        // Increment usage for all plans
+                        await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: updatedMerchant.plan === 'trial' ? 1 : 0 } });
 
                         await automationService.trackSent(shopDomain, "order-confirmation");
 
@@ -285,26 +285,30 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             abandonedMsg = abandonedMsg.replace(/{{customer_name}}/g, customerName);
 
             if (abandonedTemplate.isPoll && abandonedTemplate.pollOptions?.length > 0) {
-                // Trial check for abandoned cart
-                if (merchant.plan === 'trial' && merchant.trialUsage >= (merchant.trialLimit || 10)) {
-                    console.warn(`[ShopifyWebhook] Trial limit reached for ${shopDomain} (Abandoned Cart blocked)`);
+                // Usage check for abandoned cart
+                const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
+                const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+                if ((merchant.usage || 0) >= currentLimit) {
+                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Abandoned Cart blocked)`);
                     return res.status(200).send("ok");
                 }
 
                 const result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, abandonedMsg, abandonedTemplate.pollOptions);
-                if (result?.success && merchant.plan === 'trial') {
-                    await Merchant.updateOne({ shopDomain }, { $inc: { trialUsage: 1 } });
+                if (result?.success) {
+                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
                 }
             } else {
-                // Trial check for abandoned cart
-                if (merchant.plan === 'trial' && merchant.trialUsage >= (merchant.trialLimit || 10)) {
-                    console.warn(`[ShopifyWebhook] Trial limit reached for ${shopDomain} (Abandoned Cart blocked)`);
+                // Usage check for abandoned cart
+                const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
+                const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+                if ((merchant.usage || 0) >= currentLimit) {
+                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Abandoned Cart blocked)`);
                     return res.status(200).send("ok");
                 }
 
                 const result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, abandonedMsg);
-                if (result?.success && merchant.plan === 'trial') {
-                    await Merchant.updateOne({ shopDomain }, { $inc: { trialUsage: 1 } });
+                if (result?.success) {
+                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
                 }
             }
         }
@@ -319,26 +323,30 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             fulfillmentMsg = fulfillmentMsg.replace(/{{customer_name}}/g, customerName);
 
             if (fulfillmentTemplate.isPoll && fulfillmentTemplate.pollOptions?.length > 0) {
-                // Trial check for fulfillment
-                if (merchant.plan === 'trial' && merchant.trialUsage >= (merchant.trialLimit || 10)) {
-                    console.warn(`[ShopifyWebhook] Trial limit reached for ${shopDomain} (Fulfillment blocked)`);
+                // Usage check for fulfillment
+                const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
+                const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+                if ((merchant.usage || 0) >= currentLimit) {
+                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment blocked)`);
                     return res.status(200).send("ok");
                 }
 
                 const result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, fulfillmentMsg, fulfillmentTemplate.pollOptions);
-                if (result?.success && merchant.plan === 'trial') {
-                    await Merchant.updateOne({ shopDomain }, { $inc: { trialUsage: 1 } });
+                if (result?.success) {
+                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
                 }
             } else {
-                // Trial check for fulfillment
-                if (merchant.plan === 'trial' && merchant.trialUsage >= (merchant.trialLimit || 10)) {
-                    console.warn(`[ShopifyWebhook] Trial limit reached for ${shopDomain} (Fulfillment blocked)`);
+                // Usage check for fulfillment
+                const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
+                const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+                if ((merchant.usage || 0) >= currentLimit) {
+                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment blocked)`);
                     return res.status(200).send("ok");
                 }
 
                 const result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, fulfillmentMsg);
-                if (result?.success && merchant.plan === 'trial') {
-                    await Merchant.updateOne({ shopDomain }, { $inc: { trialUsage: 1 } });
+                if (result?.success) {
+                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
                 }
             }
         }

@@ -36,9 +36,10 @@ const MerchantSchema = new mongoose.Schema(
     plan: { type: String, default: 'free' },
     billingStatus: { type: String, default: 'inactive' },
 
-    // Trial System
+    // Trial & Usage System
     trialActivated: { type: Boolean, default: false },
     trialStartedAt: { type: Date },
+    usage: { type: Number, default: 0 },
     trialUsage: { type: Number, default: 0 },
     trialLimit: { type: Number, default: 10 },
 

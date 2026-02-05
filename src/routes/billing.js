@@ -137,11 +137,17 @@ router.get('/status', async (req, res) => {
         const merchant = await Merchant.findOne({ shopDomain: shop });
 
         // If no merchant yet, return none
-        if (!merchant) return res.json({ plan: 'none', status: 'none' });
-        // Return current plan and active status
+        if (!merchant) return res.json({ plan: 'none', status: 'none', usage: 0, limit: 10 });
+
+        const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
+        const limit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+
+        // Return current plan, active status, usage and limit
         res.json({
             plan: merchant.plan || 'free',
-            status: merchant.billingStatus || 'none'
+            status: merchant.billingStatus || 'none',
+            usage: merchant.usage || 0,
+            limit: limit
         });
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch status' });
