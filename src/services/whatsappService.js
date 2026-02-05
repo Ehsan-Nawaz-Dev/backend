@@ -253,8 +253,12 @@ class WhatsAppService {
                         const { shopifyService } = await import("./shopifyService.js");
 
                         const merchant = await Merchant.findOne({ shopDomain });
-                        if (!merchant || !merchant.shopifyAccessToken) {
-                            console.warn(`[Interaction] No merchant/token found for ${shopDomain}`);
+                        if (!merchant) {
+                            console.warn(`[Interaction] Merchant record NOT FOUND for ${shopDomain}`);
+                            continue;
+                        }
+                        if (!merchant.shopifyAccessToken) {
+                            console.warn(`[Interaction] Merchant FOUND but NO ACCESS TOKEN for ${shopDomain}`);
                             continue;
                         }
 
