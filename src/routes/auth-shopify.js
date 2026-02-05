@@ -121,6 +121,7 @@ router.get("/callback", async (req, res) => {
 
     if (existingMerchant) {
       // Update existing - preserve custom settings, just update token and shop info
+      console.log(`[OAuth] Updating existing merchant ${shop}. New Token Length: ${accessToken?.length}`);
       existingMerchant.shopifyAccessToken = accessToken;
       existingMerchant.storeName = shopData?.name || existingMerchant.storeName;
       existingMerchant.email = shopData?.email || existingMerchant.email;
@@ -129,7 +130,8 @@ router.get("/callback", async (req, res) => {
       existingMerchant.timezone = shopData?.iana_timezone || existingMerchant.timezone;
       existingMerchant.country = shopData?.country_name || existingMerchant.country;
       existingMerchant.isActive = true;
-      await existingMerchant.save();
+      const saved = await existingMerchant.save();
+      console.log(`[OAuth] Save result: ${!!saved}`);
       merchant = existingMerchant;
       console.log(`[OAuth] Merchant RE-AUTHORIZED: ${shop}`);
     } else {
