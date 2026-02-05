@@ -596,14 +596,20 @@ class WhatsAppService {
         } catch (error) {
             console.error(`[WhatsApp] Error sending message:`, error);
 
+            // Check multiple error message locations (Baileys uses Boom errors)
+            const errorMsg = error.message || error.output?.payload?.message || '';
+            const isConnectionError = errorMsg.includes('Connection Closed') ||
+                errorMsg.includes('conflict') ||
+                error.isBoom;  // All Boom errors typically mean connection issues
+
             // Retry on connection errors
-            if (retryCount < 1 && (error.message?.includes('Connection Closed') || error.message?.includes('conflict'))) {
-                console.log(`[WhatsApp] Connection error, waiting 5s and retrying...`);
+            if (retryCount < 1 && isConnectionError) {
+                console.log(`[WhatsApp] Connection error (${errorMsg}), waiting 5s and retrying...`);
                 await WhatsAppService.delay(5000);
                 return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
             }
 
-            return { success: false, error: error.message };
+            return { success: false, error: errorMsg || error.message };
         }
     }
 
@@ -658,14 +664,20 @@ class WhatsAppService {
         } catch (error) {
             console.error(`[WhatsApp] Error sending poll:`, error);
 
+            // Check multiple error message locations (Baileys uses Boom errors)
+            const errorMsg = error.message || error.output?.payload?.message || '';
+            const isConnectionError = errorMsg.includes('Connection Closed') ||
+                errorMsg.includes('conflict') ||
+                error.isBoom;  // All Boom errors typically mean connection issues
+
             // Retry on connection errors
-            if (retryCount < 1 && (error.message?.includes('Connection Closed') || error.message?.includes('conflict'))) {
-                console.log(`[WhatsApp] Connection error for poll, waiting 5s and retrying...`);
+            if (retryCount < 1 && isConnectionError) {
+                console.log(`[WhatsApp] Connection error for poll (${errorMsg}), waiting 5s and retrying...`);
                 await WhatsAppService.delay(5000);
                 return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, retryCount + 1);
             }
 
-            return { success: false, error: error.message };
+            return { success: false, error: errorMsg || error.message };
         }
     }
 }
