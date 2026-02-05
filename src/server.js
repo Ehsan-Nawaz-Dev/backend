@@ -37,13 +37,18 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "whatflow-backend" });
 });
 
-// Root endpoint
+// Root endpoint - Smart Redirect
 app.get("/", (req, res) => {
-  res.json({
-    message: "WhatFlow Backend API",
-    status: "running",
-    version: "1.0.0"
-  });
+  const shop = req.query.shop;
+  if (shop) {
+    // If shop param exists, it's likely an install request -> Go to Auth
+    return res.redirect(`/api/auth/shopify?shop=${shop}`);
+  }
+
+  // Otherwise, redirect to the frontend dashboard
+  // Use the env var or fallback
+  const frontendUrl = process.env.FRONTEND_APP_URL || "https://whatflow-alpha.vercel.app/dashboard";
+  res.redirect(frontendUrl);
 });
 
 // Redirect /auth to /api/auth/shopify (Legacy/Standard Shopify support)
