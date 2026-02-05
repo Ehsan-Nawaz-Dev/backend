@@ -143,6 +143,21 @@ class WhatsAppService {
         };
     }
 
+    /**
+     * Wait for the socket to be authenticated and ready for sending.
+     */
+    async waitForSocket(shopDomain, timeoutMs = 15000) {
+        const startTime = Date.now();
+        while (Date.now() - startTime < timeoutMs) {
+            const sock = this.sockets.get(shopDomain);
+            if (sock && sock.user) {
+                return sock;
+            }
+            await WhatsAppService.delay(1000);
+        }
+        return null;
+    }
+
     async initializeClient(shopDomain) {
         try {
             // Close existing socket if any
@@ -611,87 +626,64 @@ class WhatsAppService {
         try {
             console.log(`[WhatsApp] sendMessage called for ${shopDomain} to ${phoneNumber}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
 
-            // Protection: Check if merchant is blocked
             const merchant = await Merchant.findOne({ shopDomain });
             if (merchant && merchant.isActive === false) {
                 console.warn(`[WhatsApp] Blocked attempt: ${shopDomain} is inactive.`);
                 return { success: false, error: "Operation blocked: Account is inactive." };
             }
 
-            const sock = this.sockets.get(shopDomain);
-
-            if (!sock) {
-                // Try to reconnect if no socket
-                if (retryCount < 1) {
-                    console.log(`[WhatsApp] No socket, attempting to reconnect...`);
-                    await this.initializeClient(shopDomain);
-                    await WhatsAppService.delay(5000);
-                    return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
-                }
-                console.error(`[WhatsApp] No socket found for ${shopDomain}. Available sockets: ${Array.from(this.sockets.keys()).join(", ") || "none"}`);
-                return { success: false, error: "WhatsApp not connected - no socket" };
-            }
-
-            if (!sock.user) {
-                // Wait a bit if connection is initializing
-                if (retryCount < 1) {
-                    console.log(`[WhatsApp] Socket exists but not authenticated, waiting...`);
-                    await WhatsAppService.delay(5000);
-                    return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
-                }
-                console.error(`[WhatsApp] Socket exists but no user for ${shopDomain}. Connection might be initializing.`);
-                return { success: false, error: "WhatsApp not connected - not authenticated" };
-            }
-
-            const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
-
-            // 1. Check daily safety limit (Unofficial Device only)
+            // 1. Daily Limit Check
             const canSend = await this.checkDailyLimit(shopDomain);
             if (!canSend) {
                 return { success: false, error: "Daily safety limit reached for this number. Wait 24 hours or switch to WhatsApp Cloud API for unlimited sending." };
             }
 
-            // 2. Randomize message slightly
+            // 2. Socket Readiness
+            let sock = this.sockets.get(shopDomain);
+            if (!sock || !sock.user) {
+                console.log(`[WhatsApp] Socket not ready for ${shopDomain}, waiting...`);
+                sock = await this.waitForSocket(shopDomain, 10000); // 10s wait
+            }
+
+            if (!sock || !sock.user) {
+                if (retryCount < 2) {
+                    console.log(`[WhatsApp] Forced Re-init for ${shopDomain} (Retry ${retryCount + 1}/2)`);
+                    await this.initializeClient(shopDomain);
+                    await WhatsAppService.delay(10000);
+                    return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
+                }
+                return { success: false, error: "WhatsApp connection timeout - check phone device" };
+            }
+
+            const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
             const safeMessage = this.randomizeMessage(message);
 
-            // 3. Add a small human-like delay even for single messages (3 - 6 seconds for better safety)
+            // 3. Human-like throttling (3-6s)
             const randomDelay = Math.floor(Math.random() * 3000) + 3000;
             console.log(`[WhatsApp] Throttling message to ${formattedNumber} for ${randomDelay}ms...`);
             await new Promise(resolve => setTimeout(resolve, randomDelay));
 
-            console.log(`[WhatsApp] Sending message to ${formattedNumber}@s.whatsapp.net`);
+            try {
+                console.log(`[WhatsApp] Sending message to ${formattedNumber}@s.whatsapp.net`);
+                await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, { text: safeMessage });
+                console.log(`[WhatsApp] Message sent successfully to ${formattedNumber}`);
+                return { success: true };
+            } catch (innerError) {
+                const statusCode = innerError.output?.statusCode || innerError.output?.payload?.statusCode;
+                const errorMsg = innerError.message || innerError.output?.payload?.message || '';
+                const isConnectionError = errorMsg.includes('Connection Closed') || statusCode === 428 || innerError.isBoom;
 
-            await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, { text: safeMessage });
-            console.log(`[WhatsApp] Message sent successfully to ${formattedNumber}`);
-            return { success: true };
-        } catch (error) {
-            console.error(`[WhatsApp] Error sending message:`, error);
-
-            // Check multiple error message locations (Baileys uses Boom errors)
-            const statusCode = error.output?.statusCode || error.output?.payload?.statusCode;
-            const errorMsg = error.message || error.output?.payload?.message || '';
-            const isConnectionError =
-                errorMsg.includes('Connection Closed') ||
-                errorMsg.includes('Connection Terminated') ||
-                errorMsg.includes('conflict') ||
-                statusCode === 428 ||
-                statusCode === 408 ||
-                error.isBoom;  // All Boom errors typically mean connection issues
-
-            // Retry on connection errors
-            if (retryCount < 2 && isConnectionError) {
-                console.log(`[WhatsApp] 🔄 Connection error detected (Status: ${statusCode}, Msg: ${errorMsg}). Attempting re-init and retry ${retryCount + 1}/2...`);
-
-                // IMPORTANT: We must wait for initializeClient to actually set the new socket
-                await this.initializeClient(shopDomain);
-
-                // Give it some time to actually start Connecting
-                await WhatsAppService.delay(7000);
-
-                return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
+                if (retryCount < 2 && isConnectionError) {
+                    console.warn(`[WhatsApp] Connection error (428). Force re-init and retry ${retryCount + 1}/2...`);
+                    await this.initializeClient(shopDomain);
+                    await WhatsAppService.delay(10000);
+                    return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
+                }
+                throw innerError;
             }
-
-            return { success: false, error: errorMsg || error.message };
+        } catch (error) {
+            console.error(`[WhatsApp] sendMessage CRITICAL error:`, error);
+            return { success: false, error: error.message || "Unknown error" };
         }
     }
 
