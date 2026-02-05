@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import axios from 'axios';
 import { Merchant } from '../models/Merchant.js';
-import { plans } from '../config/plans.js';
+import { Plan } from '../models/Plan.js'; // Import Model
 
 const router = Router();
 const SHOPIFY_APP_URL = (process.env.SHOPIFY_APP_URL || "http://localhost:5000").replace(/\/$/, "");
@@ -9,10 +9,12 @@ const SHOPIFY_APP_URL = (process.env.SHOPIFY_APP_URL || "http://localhost:5000")
 // Create Charge
 router.post('/create', async (req, res) => {
     const { shop } = req.query;
-    const { plan } = req.body;
-    console.log(`[Billing] Creating charge for shop: ${shop}, plan: ${plan}`);
+    const { plan: planId } = req.body; // planId e.g. 'starter'
+    console.log(`[Billing] Creating charge for shop: ${shop}, plan: ${planId}`);
 
-    if (!plans[plan]) return res.status(400).json({ message: 'Invalid plan selected' });
+    // Fetch Plan from DB
+    const planConfig = await Plan.findOne({ id: planId });
+    if (!planConfig) return res.status(400).json({ message: 'Invalid plan selected' });
 
     try {
         const merchant = await Merchant.findOne({ shopDomain: shop });
@@ -23,9 +25,9 @@ router.post('/create', async (req, res) => {
         }
 
         // --- SPECIAL HANDLING FOR FREE PLAN ---
-        if (plans[plan].price === 0) {
+        if (planConfig.price === 0) {
             console.log(`[Billing] Free plan selected. Skipping Shopify Charge.`);
-            merchant.plan = plan;
+            merchant.plan = planId;
             merchant.billingStatus = 'active';
             await merchant.save();
 
@@ -66,9 +68,9 @@ router.post('/create', async (req, res) => {
         // 4. Create Charge
         const chargeData = {
             recurring_application_charge: {
-                name: `${plans[plan].name} Plan`,
-                price: plans[plan].price,
-                return_url: `${SHOPIFY_APP_URL}/api/billing/confirm?shop=${shop}&plan=${plan}`,
+                name: `${planConfig.name} Plan`,
+                price: planConfig.price,
+                return_url: `${SHOPIFY_APP_URL}/api/billing/confirm?shop=${shop}&plan=${planId}`,
                 test: true
             }
         };

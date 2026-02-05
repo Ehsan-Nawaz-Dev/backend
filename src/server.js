@@ -6,6 +6,7 @@ import morgan from "morgan";
 import dotenv from "dotenv";
 import { connectDB } from "./config/db.js";
 import apiRouter from "./routes/index.js";
+import planRoutes from './routes/plans.js';
 import { whatsappService } from "./services/whatsappService.js";
 
 dotenv.config();
@@ -47,7 +48,7 @@ app.get("/", (req, res) => {
 
   // Otherwise, redirect to the frontend dashboard
   // Use the env var or fallback
-  const frontendUrl = process.env.FRONTEND_APP_URL || "https://whatflow-alpha.vercel.app/dashboard";
+  const frontendUrl = process.env.FRONTEND_APP_URL || "https://whatflow-alpha.vercel.app";
   res.redirect(frontendUrl);
 });
 

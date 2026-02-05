@@ -151,7 +151,12 @@ router.use("/qrcode", qrcodeRouter);
 router.use("/automations", automationsRouter);
 router.use("/campaigns", campaignsRouter);
 router.use("/diagnostics", diagnosticsRouter);
+import planRouter from "./plans.js";
+
+// ... previous imports
+
 router.use("/billing", billingRouter);
+router.use("/plans", planRouter); // Register here
 router.use("/trial", trialRouter);
 router.use("/admin", adminRouter);
 
