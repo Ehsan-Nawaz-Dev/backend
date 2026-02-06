@@ -138,7 +138,8 @@ router.post("/chat-button", async (req, res) => {
 
         // Determine backend base URL
         const appUrl = (process.env.SHOPIFY_APP_URL || "https://api.whatomatic.com").replace(/\/$/, "");
-        const scriptUrl = `${appUrl}/Api/storefront/button.js?shop=${shopDomain}`;
+        const scriptUrl = `${appUrl}/api/storefront/button.js?shop=${shopDomain}`;
+        console.log(`[ScriptTag] Preparing to sync for ${shopDomain}. URL: ${scriptUrl}`);
 
         // 1. Fetch existing script tags
         const existingRes = await axios.get(`https://${shopDomain}/admin/api/2024-01/script_tags.json`, {

@@ -9,9 +9,16 @@ router.get("/button.js", async (req, res) => {
     if (!shop) return res.status(400).send("// Missing shop parameter");
 
     try {
+        console.log(`[Storefront] Serving button script for: ${shop}`);
         const settings = await ChatButtonSettings.findOne({ shopDomain: shop });
 
-        if (!settings || !settings.enabled) {
+        if (!settings) {
+            console.log(`[Storefront] No settings found for ${shop}`);
+            return res.type("application/javascript").send("// WhatsApp button settings not found");
+        }
+
+        if (!settings.enabled) {
+            console.log(`[Storefront] Button is disabled for ${shop}`);
             return res.type("application/javascript").send("// WhatsApp button is disabled");
         }
 
