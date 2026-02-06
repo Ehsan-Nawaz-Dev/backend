@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { ChatButtonSettings } from "../models/ChatButtonSettings.js";
+import { Merchant } from "../models/Merchant.js";
 
 const router = Router();
 
