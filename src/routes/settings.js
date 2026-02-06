@@ -5,7 +5,11 @@ import { ChatButtonSettings } from "../models/ChatButtonSettings.js";
 const router = Router();
 
 // Helper to resolve merchant by shop domain (for now via query param)
-const getShopDomain = (req) => req.query.shop || req.headers["x-shop-domain"];
+const getShopDomain = (req) => {
+  const shop = req.query.shop || req.headers["x-shop-domain"];
+  if (!shop) return null;
+  return shop.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+};
 
 // GET /api/settings
 router.get("/", async (req, res) => {

@@ -5,16 +5,37 @@ const router = Router();
 
 // GET /api/storefront/button.js?shop=your-shop.myshopify.com
 router.get("/button.js", async (req, res) => {
-    const { shop } = req.query;
+    let { shop } = req.query;
     if (!shop) return res.status(400).send("// Missing shop parameter");
 
+    // Clean shop domain
+    shop = shop.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+
     try {
-        console.log(`[Storefront] Serving button script for: ${shop}`);
-        const settings = await ChatButtonSettings.findOne({ shopDomain: shop });
+        console.log(`[Storefront] Serving button script for cleaned shop: ${shop}`);
+
+        // Search for settings - using regex for robustness although cleaned shop should match
+        const settings = await ChatButtonSettings.findOne({
+            shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
+        });
 
         if (!settings) {
-            console.log(`[Storefront] No settings found for ${shop}`);
-            return res.type("application/javascript").send("// WhatsApp button settings not found");
+            console.log(`[Storefront] No settings found for ${shop}, checking merchant fallback`);
+            const merchant = await Merchant.findOne({ shopDomain: { $regex: new RegExp(`^${shop}$`, "i") } });
+
+            if (!merchant) {
+                return res.type("application/javascript").send("// WhatsApp button settings and merchant not found");
+            }
+
+            // Simple fallback if no specific button settings exist yet
+            const fallbackPhone = merchant.whatsappNumber || merchant.phone || "";
+            const script = generateScript({
+                phoneNumber: fallbackPhone,
+                buttonText: "Chat with us",
+                position: "right",
+                color: "#25D366"
+            });
+            return res.type("application/javascript").send(script);
         }
 
         if (!settings.enabled) {
@@ -22,10 +43,23 @@ router.get("/button.js", async (req, res) => {
             return res.type("application/javascript").send("// WhatsApp button is disabled");
         }
 
-        const { phoneNumber, buttonText, position, color } = settings;
-        const normalizedPhone = phoneNumber ? phoneNumber.replace(/[^\d]/g, "") : "";
+        const script = generateScript({
+            phoneNumber: settings.phoneNumber,
+            buttonText: settings.buttonText,
+            position: settings.position,
+            color: settings.color
+        });
 
-        const script = `
+        res.type("application/javascript").send(script);
+    } catch (err) {
+        console.error("Error serving storefront script:", err);
+        res.status(500).send("// Internal server error");
+    }
+});
+
+function generateScript({ phoneNumber, buttonText, position, color }) {
+    const normalizedPhone = phoneNumber ? phoneNumber.replace(/[^\d]/g, "") : "";
+    return `
 (function() {
     function initWhatsAppButton() {
         if (document.getElementById('whatflow-whatsapp-button')) return;
@@ -82,13 +116,7 @@ router.get("/button.js", async (req, res) => {
         window.addEventListener('load', initWhatsAppButton);
     }
 })();
-        `;
-
-        res.type("application/javascript").send(script);
-    } catch (err) {
-        console.error("Error serving storefront script:", err);
-        res.status(500).send("// Internal server error");
-    }
-});
+    `;
+}
 
 export default router;
