@@ -12,7 +12,7 @@ const router = Router();
 
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
-const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || "read_checkouts,read_customers,read_fulfillments,read_orders,write_orders,read_billing,write_billing";
+const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || "read_checkouts,read_customers,read_fulfillments,read_orders,write_orders,read_billing,write_billing,write_script_tags";
 console.log(`[OAuth] Active Scopes: ${SHOPIFY_SCOPES}`);
 const SHOPIFY_APP_URL = (process.env.SHOPIFY_APP_URL || "http://localhost:5000").replace(/\/$/, "");
 const FRONTEND_APP_URL = process.env.FRONTEND_APP_URL || "http://localhost:5173/dashboard";

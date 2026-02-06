@@ -135,7 +135,10 @@ router.post("/chat-button", async (req, res) => {
       const merchant = await Merchant.findOne({ shopDomain });
       if (merchant && merchant.shopifyAccessToken) {
         const axios = (await import("axios")).default;
-        const scriptUrl = `https://api.whatomatic.com/Api/storefront/button.js?shop=${shopDomain}`;
+
+        // Determine backend base URL
+        const appUrl = (process.env.SHOPIFY_APP_URL || "https://api.whatomatic.com").replace(/\/$/, "");
+        const scriptUrl = `${appUrl}/Api/storefront/button.js?shop=${shopDomain}`;
 
         // 1. Fetch existing script tags
         const existingRes = await axios.get(`https://${shopDomain}/admin/api/2024-01/script_tags.json`, {
