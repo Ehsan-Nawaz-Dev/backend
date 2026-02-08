@@ -23,6 +23,9 @@ router.get("/", async (req, res) => {
             merchant: {
                 exists: !!merchant,
                 hasAccessToken: !!merchant?.shopifyAccessToken,
+                needsReauth: merchant?.needsReauth || false,
+                reauthReason: merchant?.reauthReason || null,
+                reauthDetectedAt: merchant?.reauthDetectedAt || null,
                 pendingConfirmTag: merchant?.pendingConfirmTag,
                 orderConfirmTag: merchant?.orderConfirmTag,
                 orderCancelTag: merchant?.orderCancelTag,
