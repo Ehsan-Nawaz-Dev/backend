@@ -112,7 +112,8 @@ router.get("/callback", async (req, res) => {
       orderConfirmReply: "Thank you! Your order has been confirmed. ✅",
       orderCancelReply: "Your order has been cancelled. ❌",
       isActive: true,
-      installedAt: new Date()
+      installedAt: new Date(),
+      scopeVersion: parseInt(process.env.SHOPIFY_SCOPE_VERSION || '1')
     };
 
     const existingMerchant = await Merchant.findOne({ shopDomain: shop });
@@ -134,6 +135,8 @@ router.get("/callback", async (req, res) => {
       existingMerchant.needsReauth = false;
       existingMerchant.reauthReason = null;
       existingMerchant.reauthDetectedAt = null;
+      // Update scope version to current
+      existingMerchant.scopeVersion = parseInt(process.env.SHOPIFY_SCOPE_VERSION || '1');
       const saved = await existingMerchant.save();
       console.log(`[OAuth] Save result: ${!!saved}`);
       merchant = existingMerchant;

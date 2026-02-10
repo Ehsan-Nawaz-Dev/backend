@@ -56,6 +56,9 @@ const MerchantSchema = new mongoose.Schema(
     needsReauth: { type: Boolean, default: false },
     reauthReason: { type: String },
     reauthDetectedAt: { type: Date },
+
+    // Scope version tracking (to detect scope changes)
+    scopeVersion: { type: Number, default: 1 },
   },
   { timestamps: true }
 );
