@@ -15,10 +15,6 @@ const ActivityLogSchema = new mongoose.Schema(
     errorMessage: { type: String },
     channel: { type: String, default: "whatsapp" },
     rawPayload: { type: Object },
-
-    // Deduplication tracking
-    eventType: { type: String }, // e.g., "order_confirmation", "order_cancellation"
-    messageSent: { type: Boolean, default: false }, // Track if message was actually sent
   },
   { timestamps: true },
 );

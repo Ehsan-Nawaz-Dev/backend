@@ -1,5 +1,4 @@
 import axios from "axios";
-import { Merchant } from "../models/Merchant.js";
 
 class ShopifyService {
     /**
@@ -98,47 +97,7 @@ class ShopifyService {
         } catch (error) {
             const errorDetails = error.response?.data || error.message;
             console.error(`[ShopifyService] ERROR adding tag to order ${numericOrderId}:`, errorDetails);
-
-            // Check if this is an invalid token error
-            await this.handlePotentialAuthError(shopDomain, error);
-
             return { success: false, error: JSON.stringify(errorDetails) };
-        }
-    }
-
-    /**
-     * Checks if an error is due to invalid authentication and marks merchant for re-auth
-     * @param {string} shopDomain - The shop's domain
-     * @param {Error} error - The axios error object
-     */
-    async handlePotentialAuthError(shopDomain, error) {
-        const errorData = error.response?.data;
-        const errorString = JSON.stringify(errorData || error.message).toLowerCase();
-
-        // Detect various forms of authentication errors
-        const isAuthError =
-            error.response?.status === 401 ||
-            errorString.includes('invalid api key') ||
-            errorString.includes('access token') ||
-            errorString.includes('unauthorized') ||
-            errorString.includes('unrecognized login');
-
-        if (isAuthError && shopDomain) {
-            console.error(`[ShopifyService] 🚨 AUTH ERROR DETECTED for ${shopDomain} - Marking for re-authorization`);
-
-            try {
-                await Merchant.findOneAndUpdate(
-                    { shopDomain },
-                    {
-                        needsReauth: true,
-                        reauthReason: 'Invalid or expired Shopify access token',
-                        reauthDetectedAt: new Date()
-                    }
-                );
-                console.log(`[ShopifyService] Merchant ${shopDomain} marked for re-authorization`);
-            } catch (dbError) {
-                console.error(`[ShopifyService] Failed to mark merchant for reauth:`, dbError.message);
-            }
         }
     }
 
@@ -154,10 +113,6 @@ class ShopifyService {
             return response.data.order;
         } catch (error) {
             console.error(`Error fetching Shopify order ${orderId}:`, error.message);
-
-            // Check if this is an invalid token error
-            await this.handlePotentialAuthError(shopDomain, error);
-
             return null;
         }
     }

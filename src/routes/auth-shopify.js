@@ -112,8 +112,7 @@ router.get("/callback", async (req, res) => {
       orderConfirmReply: "Thank you! Your order has been confirmed. ✅",
       orderCancelReply: "Your order has been cancelled. ❌",
       isActive: true,
-      installedAt: new Date(),
-      scopeVersion: parseInt(process.env.SHOPIFY_SCOPE_VERSION || '1')
+      installedAt: new Date()
     };
 
     const existingMerchant = await Merchant.findOne({ shopDomain: shop });
@@ -131,16 +130,10 @@ router.get("/callback", async (req, res) => {
       existingMerchant.timezone = shopData?.iana_timezone || existingMerchant.timezone;
       existingMerchant.country = shopData?.country_name || existingMerchant.country;
       existingMerchant.isActive = true;
-      // Clear re-authorization flags on successful re-auth
-      existingMerchant.needsReauth = false;
-      existingMerchant.reauthReason = null;
-      existingMerchant.reauthDetectedAt = null;
-      // Update scope version to current
-      existingMerchant.scopeVersion = parseInt(process.env.SHOPIFY_SCOPE_VERSION || '1');
       const saved = await existingMerchant.save();
       console.log(`[OAuth] Save result: ${!!saved}`);
       merchant = existingMerchant;
-      console.log(`[OAuth] Merchant RE-AUTHORIZED: ${shop} - Reauth flags cleared ✅`);
+      console.log(`[OAuth] Merchant RE-AUTHORIZED: ${shop}`);
     } else {
       merchant = await Merchant.create(merchantData);
       console.log(`[OAuth] NEW Merchant created: ${shop}`);

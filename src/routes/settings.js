@@ -187,35 +187,4 @@ router.post("/chat-button", async (req, res) => {
   }
 });
 
-// GET /api/settings/auth-status - Check if Shopify re-authorization is needed
-router.get("/auth-status", async (req, res) => {
-  try {
-    const shopDomain = getShopDomain(req);
-    if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
-
-    const merchant = await Merchant.findOne({ shopDomain });
-    if (!merchant) {
-      return res.json({
-        authenticated: false,
-        needsReauth: true,
-        reason: "Merchant not found",
-        reauthUrl: `${process.env.SHOPIFY_APP_URL || 'https://api.whatomatic.com'}/api/auth/shopify?shop=${shopDomain}`
-      });
-    }
-
-    const hasValidToken = !!merchant.shopifyAccessToken && !merchant.needsReauth;
-
-    res.json({
-      authenticated: hasValidToken,
-      needsReauth: merchant.needsReauth || !merchant.shopifyAccessToken,
-      reason: merchant.reauthReason || (!merchant.shopifyAccessToken ? 'No access token' : null),
-      detectedAt: merchant.reauthDetectedAt,
-      reauthUrl: `${process.env.SHOPIFY_APP_URL || 'https://api.whatomatic.com'}/api/auth/shopify?shop=${shopDomain}`
-    });
-  } catch (err) {
-    console.error("Error checking auth status", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
 export default router;
