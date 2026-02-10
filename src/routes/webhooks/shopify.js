@@ -122,14 +122,28 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         console.log(`[ShopifyWebhook] Order object keys: ${Object.keys(order).join(", ")}`);
         if (order.order) console.log(`[ShopifyWebhook] Found nested order object. Keys: ${Object.keys(order.order).join(", ")}`);
 
+        // DEDUPLICATION CHECK: Ensure we haven't already sent a confirmation for this order
+        const existingConfirmation = await ActivityLog.findOne({
+            orderId: orderId,
+            eventType: "order_confirmation",
+            messageSent: true
+        });
+
+        if (existingConfirmation) {
+            console.log(`[ShopifyWebhook] ⚠️ Order confirmation already sent for order ${orderId}. Skipping duplicate.`);
+            return res.status(200).send('ok'); // Tell Shopify we got it, but don't process
+        }
+
         const activity = await ActivityLog.create({
             merchant: merchant?._id,
             type: 'pending',
             orderId: orderId,
+            eventType: 'order_confirmation',
             message: 'Processing Order Notification...',
             customerName: customerName,
             customerPhone: customerPhoneFormatted,
-            rawPayload: order
+            rawPayload: order,
+            messageSent: false
         });
 
         res.status(200).send('ok'); // Tell Shopify we got it
@@ -232,6 +246,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                         if (activity) {
                             activity.type = 'confirmed';
                             activity.message = 'WhatsApp Confirmation Sent ✅';
+                            activity.messageSent = true; // Mark as sent to prevent duplicates
                             await activity.save();
                         }
                     } else {
@@ -258,7 +273,32 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         })();
         return;
     } else if (topic === "orders/cancelled") {
-        await logEvent("cancelled", req, shopDomain);
+        const orderId = order.id?.toString() || order.order_id?.toString();
+
+        // DEDUPLICATION CHECK: Ensure we haven't already sent a cancellation for this order
+        const existingCancellation = await ActivityLog.findOne({
+            orderId: orderId,
+            eventType: "order_cancellation",
+            messageSent: true
+        });
+
+        if (existingCancellation) {
+            console.log(`[ShopifyWebhook] ⚠️ Order cancellation already sent for order ${orderId}. Skipping duplicate.`);
+            return res.status(200).send('ok');
+        }
+
+        // Create activity log for cancellation
+        const cancelActivity = await ActivityLog.create({
+            merchant: merchant?._id,
+            type: 'cancelled',
+            orderId: orderId,
+            eventType: 'order_cancellation',
+            message: 'Processing Cancellation...',
+            customerName: customerName,
+            customerPhone: customerPhoneFormatted,
+            rawPayload: order,
+            messageSent: false
+        });
 
         const cancelSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
         if (cancelSetting?.enabled && customerPhoneFormatted) {
@@ -268,10 +308,18 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 cancelMsg = replacePlaceholders(cancelMsg, { order, merchant });
                 cancelMsg = cancelMsg.replace(/{{customer_name}}/g, customerName);
 
+                let result;
                 if (cancelTemplate.isPoll && cancelTemplate.pollOptions?.length > 0) {
-                    await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions);
+                    result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions);
                 } else {
-                    await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
+                    result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
+                }
+
+                // Mark as sent if successful
+                if (result?.success && cancelActivity) {
+                    cancelActivity.messageSent = true;
+                    cancelActivity.message = 'Cancellation message sent ✅';
+                    await cancelActivity.save();
                 }
             }
         }

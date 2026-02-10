@@ -66,12 +66,16 @@ router.post('/create', async (req, res) => {
         }
 
         // 4. Create Charge
+        // PRODUCTION MODE: test: false means real charges
+        // Set to true only for development/testing
+        const isTestMode = process.env.SHOPIFY_BILLING_TEST === 'true';
+
         const chargeData = {
             recurring_application_charge: {
                 name: `${planConfig.name} Plan`,
                 price: planConfig.price,
                 return_url: `${SHOPIFY_APP_URL}/api/billing/confirm?shop=${shop}&plan=${planId}`,
-                test: true
+                test: isTestMode
             }
         };
 
