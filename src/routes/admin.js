@@ -2,7 +2,15 @@ import { Router } from "express";
 import { Merchant } from "../models/Merchant.js";
 import { ActivityLog } from "../models/ActivityLog.js";
 import { WhatsAppSession } from "../models/WhatsAppSession.js";
+import { WhatsAppAuth } from "../models/WhatsAppAuth.js";
+import { Template } from "../models/Template.js";
+import { AutomationSetting } from "../models/AutomationSetting.js";
+import { AutomationStat } from "../models/AutomationStat.js";
+import { Campaign } from "../models/Campaign.js";
+import { ChatButtonSettings } from "../models/ChatButtonSettings.js";
+import { NotificationSettings } from "../models/NotificationSettings.js";
 import { Plan } from "../models/Plan.js";
+import { Lead } from "../models/Lead.js";
 
 const router = Router();
 
@@ -155,24 +163,43 @@ router.get("/stats", async (req, res) => {
     }
 });
 
-// POST /api/admin/merchants/cancel-subscription - Force cancel subscription
-router.post("/merchants/cancel-subscription", async (req, res) => {
+// DELETE /api/admin/merchants/:shopDomain - NUCLEAR WIPE: Delete all data for a store
+router.delete("/merchants/:shopDomain", async (req, res) => {
     try {
-        const { shopDomain } = req.body;
+        const { shopDomain } = req.params;
         if (!shopDomain) return res.status(400).json({ error: "shopDomain is required" });
 
-        const merchant = await Merchant.findOneAndUpdate(
-            { shopDomain },
-            { billingStatus: 'inactive', plan: 'none' },
-            { new: true }
-        );
+        console.log(`[Admin] NUCLEAR DELETE triggered for: ${shopDomain}`);
 
-        if (!merchant) return res.status(404).json({ error: "Merchant not found" });
+        const merchant = await Merchant.findOne({ shopDomain });
+        const merchantId = merchant ? merchant._id : null;
 
-        res.json({ success: true, merchant });
+        // 1. Delete Merchant record
+        await Merchant.deleteOne({ shopDomain });
+
+        // 2. Delete WhatsApp Session & Auth
+        await WhatsAppSession.deleteOne({ shopDomain });
+        await WhatsAppAuth.deleteOne({ shopDomain });
+
+        // 3. Delete based on merchant ID (if found)
+        if (merchantId) {
+            await Template.deleteMany({ merchant: merchantId });
+            await AutomationSetting.deleteMany({ merchant: merchantId });
+            await AutomationStat.deleteMany({ merchant: merchantId });
+            await Campaign.deleteMany({ merchant: merchantId });
+            await ChatButtonSettings.deleteMany({ merchant: merchantId });
+            await NotificationSettings.deleteMany({ merchant: merchantId });
+            await Lead.deleteMany({ merchant: merchantId });
+        }
+
+        // 4. Delete Activity Logs (typically indexed by shopDomain)
+        await ActivityLog.deleteMany({ shopDomain });
+
+        console.log(`[Admin] Successfully wiped all data for ${shopDomain}`);
+        res.json({ success: true, message: `All data for ${shopDomain} has been deleted.` });
     } catch (err) {
-        console.error("Admin: Error canceling subscription", err);
-        res.status(500).json({ error: "Failed to cancel subscription" });
+        console.error("Admin: Error during nuclear delete", err);
+        res.status(500).json({ error: "Failed to delete store data completely." });
     }
 });
 
