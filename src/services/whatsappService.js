@@ -50,19 +50,19 @@ class WhatsAppService {
      */
     calculateTypingTime(message) {
         const messageLength = message.length;
-        const charsPerSecond = 3 + Math.random() * 2; // 3-5 chars/sec
+        const charsPerSecond = 5 + Math.random() * 5; // 5-10 chars/sec (Faster)
         const typingTime = (messageLength / charsPerSecond) * 1000; // in ms
 
-        // Cap between 2 and 15 seconds
-        return Math.min(Math.max(typingTime, 2000), 15000);
+        // Cap between 1 and 5 seconds for responsiveness
+        return Math.min(Math.max(typingTime, 1000), 5000);
     }
 
     /**
      * Human "thinking" pause before starting to type.
-     * Returns a random delay between 1-4 seconds.
+     * Returns a random delay between 0.5-2 seconds.
      */
     getThinkingPause() {
-        return Math.floor(Math.random() * 3000) + 1000; // 1-4 seconds
+        return Math.floor(Math.random() * 1500) + 500;
     }
 
     /**
@@ -70,23 +70,18 @@ class WhatsAppService {
      * This mimics natural human fatigue/caution.
      */
     getProgressiveDelay(sessionMessageCount) {
-        // Base delay: 3-6 seconds
-        let baseDelay = Math.floor(Math.random() * 3000) + 3000;
+        // Base delay: 2-4 seconds
+        let baseDelay = Math.floor(Math.random() * 2000) + 2000;
 
-        // Add 500ms for every 10 messages sent
-        const fatigueDelay = Math.floor(sessionMessageCount / 10) * 500;
+        // Add 500ms for every 15 messages sent
+        const fatigueDelay = Math.floor(sessionMessageCount / 15) * 500;
 
-        // Add random "distraction" delay (5% chance of 10-20 second pause)
+        // Add random "distraction" delay (3% chance of 5-10 second pause)
         const distractionChance = Math.random();
-        const distractionDelay = distractionChance < 0.05 ? Math.floor(Math.random() * 10000) + 10000 : 0;
+        const distractionDelay = distractionChance < 0.03 ? Math.floor(Math.random() * 5000) + 5000 : 0;
 
         const totalDelay = baseDelay + fatigueDelay + distractionDelay;
-
-        if (distractionDelay > 0) {
-            console.log(`[WhatsApp] 🧘 Taking a natural break (${distractionDelay}ms)...`);
-        }
-
-        return Math.min(totalDelay, 30000); // Cap at 30 seconds max
+        return Math.min(totalDelay, 15000); // Cap at 15 seconds max
     }
 
     /**
@@ -237,7 +232,7 @@ class WhatsAppService {
                     keys: makeCacheableSignalKeyStore(state.keys, logger),
                 },
                 logger,
-                browser: Browsers.windows("Chrome"),
+                browser: ["Whatomatic Backend", "Chrome", "1.1.0"],
             });
 
             this.sockets.set(shopDomain, sock);
@@ -461,12 +456,27 @@ class WhatsAppService {
                         } else {
                             // 2. Basic Keyword Detection (Text messages)
                             const input = text.toLowerCase().trim();
+                            const isPreCancelContext = log?.type === "pre-cancel";
+
                             if (input.includes("confirm") || input.includes("yes") || input.includes("theek") || input.includes("haan") || input.includes("sahi")) {
-                                activityStatus = "confirmed";
-                                tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
-                            } else if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi") || input.includes("wrong")) {
-                                activityStatus = "cancelled";
-                                tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                                // "Yes" always means Confirm in normal, but in pre-cancel it means "Yes, cancel"
+                                if (isPreCancelContext) {
+                                    activityStatus = "cancelled";
+                                    tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                                } else {
+                                    activityStatus = "confirmed";
+                                    tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+                                }
+                            } else if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi") || input.includes("wrong") || input.includes("dont") || input.includes("don't")) {
+                                // "No" or "Cancel" in normal context means Cancel.
+                                // But "No" in pre-cancel context ("Are you sure?") means "No, don't cancel" -> Confirmed
+                                if (isPreCancelContext && (input.includes("no") || input.includes("nahi") || input.includes("dont") || input.includes("don't"))) {
+                                    activityStatus = "confirmed";
+                                    tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+                                } else {
+                                    activityStatus = "cancelled";
+                                    tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                                }
                             }
                         }
 
@@ -505,7 +515,7 @@ class WhatsAppService {
                             const isConfirm = activityStatus === "confirmed";
                             const tagsToRemove = isConfirm
                                 ? [merchant.pendingConfirmTag, merchant.orderCancelTag]
-                                : [merchant.pendingConfirmTag, merchant.orderConfirmTag, "pre-cancel"];
+                                : [merchant.pendingConfirmTag, merchant.orderConfirmTag];
 
                             // 1. Attempt Shopify Tagging (Background)
                             try {
