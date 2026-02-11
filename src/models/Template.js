@@ -13,6 +13,7 @@ const TemplateSchema = new mongoose.Schema(
         "orders/cancelled",
         "admin-order-alert",
         "orders/confirmed",
+        "orders/cancel_verify",
       ],
       required: true,
     },

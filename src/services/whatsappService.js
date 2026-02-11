@@ -409,26 +409,36 @@ class WhatsAppService {
                             const firstHash = selectedHashes[0] ? Buffer.from(selectedHashes[0]).toString('hex').toUpperCase() : null;
 
                             if (firstHash) {
-                                // A. Check against Hardcoded Verification Hashes (for Pre-Cancel poll)
-                                const stayHash = crypto.createHash('sha256').update("✅ No, Keep Order").digest('hex').toUpperCase();
-                                const cancelHash = crypto.createHash('sha256').update("🗑️ Yes, Cancel Order").digest('hex').toUpperCase();
+                                // A. Check based on current context (Log Type)
+                                if (log.type === "pre-cancel") {
+                                    // We are in the verification step. Check against verification template.
+                                    const verifyTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/cancel_verify" });
+                                    const verifyOptions = verifyTemplate?.pollOptions || ["🗑️ Yes, Cancel Order", "✅ No, Keep Order"];
 
-                                if (firstHash === stayHash) {
-                                    console.log("[Interaction] Match: No, Keep Order (Stay)");
-                                    activityStatus = "confirmed";
-                                    tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
-                                } else if (firstHash === cancelHash) {
-                                    console.log("[Interaction] Match: Yes, Cancel Order (Final)");
-                                    activityStatus = "cancelled";
-                                    tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                                    for (const option of verifyOptions) {
+                                        const hash = crypto.createHash('sha256').update(option).digest('hex').toUpperCase();
+                                        if (firstHash === hash) {
+                                            console.log(`[Interaction] Match Verify Option: ${option}`);
+                                            // LOGIC: "Yes" to "Are you sure you want to cancel?" = Cancelled
+                                            // "No" to "Are you sure you want to cancel?" = Confirmed
+                                            if (option.toLowerCase().includes("no") || option.includes("✅")) {
+                                                activityStatus = "confirmed";
+                                                tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+                                            } else {
+                                                activityStatus = "cancelled";
+                                                tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                                            }
+                                            break;
+                                        }
+                                    }
                                 } else {
-                                    // B. Check against Merchant's Template Options
+                                    // Standard Confirmation Poll
                                     const confirmTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/create" });
                                     if (confirmTemplate && confirmTemplate.isPoll) {
                                         for (const option of confirmTemplate.pollOptions) {
                                             const hash = crypto.createHash('sha256').update(option).digest('hex').toUpperCase();
                                             if (firstHash === hash) {
-                                                console.log(`[Interaction] Match Template Option: ${option}`);
+                                                console.log(`[Interaction] Match Confirm Option: ${option}`);
                                                 if (option.toLowerCase().includes("confirm") || option.toLowerCase().includes("yes") || option.includes("✅")) {
                                                     activityStatus = "confirmed";
                                                     tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
@@ -443,7 +453,7 @@ class WhatsAppService {
                                 }
                             }
 
-                            // C. Fallback: If still undetermined, default to confirmed (safest bet for conversion)
+                            // B. Fallback: If still undetermined (e.g. hash mismatch), default to confirmed for safety
                             if (!activityStatus) {
                                 activityStatus = "confirmed";
                                 tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
@@ -469,8 +479,19 @@ class WhatsAppService {
                             // A. DOUBLE-CONFIRM FLOW FOR CANCELLATION
                             if (activityStatus === "cancelled" && log.type === "pending") {
                                 console.log(`[Interaction] Sending Pre-Cancel verification to ${targetPhone}`);
-                                const preCancelMsg = "Are you sure you want to cancel your order? ❌\n\nThis will stop your order from being processed immediately.";
-                                const preCancelOptions = ["✅ No, Keep Order", "🗑️ Yes, Cancel Order"];
+
+                                const verifyTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/cancel_verify" });
+                                let preCancelMsg = verifyTemplate?.message || "Are you sure you want to cancel your order? ❌\n\nThis will stop your order from being processed immediately.";
+                                const preCancelOptions = verifyTemplate?.pollOptions || ["🗑️ Yes, Cancel Order", "✅ No, Keep Order"];
+
+                                // Replace placeholders if any in verify message
+                                if (preCancelMsg.includes("{{")) {
+                                    const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
+                                    const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
+                                    if (orderData) {
+                                        preCancelMsg = replacePlaceholders(preCancelMsg, { order: orderData, merchant });
+                                    }
+                                }
 
                                 await this.sendPoll(shopDomain, targetPhone, preCancelMsg, preCancelOptions);
 

@@ -234,6 +234,15 @@ async function seedMerchantData(merchant) {
       message: `🔔 *New Order Alert!*\n\nOrder: {{order_number}}\nCustomer: {{customer_name}}\nTotal: {{grand_total}}\nItems: {{items_list}}\nAddress: {{address}}, {{city}}`,
       enabled: true,
       isPoll: false
+    },
+    {
+      merchant: merchant._id,
+      name: "Cancellation Verification",
+      event: "orders/cancel_verify",
+      message: `Are you sure you want to cancel your order? ❌\n\nThis will stop your order from being processed immediately.`,
+      enabled: true,
+      isPoll: true,
+      pollOptions: ["🗑️ Yes, Cancel Order", "✅ No, Keep Order"]
     }
   ];
 
