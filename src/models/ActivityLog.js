@@ -5,7 +5,7 @@ const ActivityLogSchema = new mongoose.Schema(
     merchant: { type: mongoose.Schema.Types.ObjectId, ref: "Merchant", required: false },
     type: {
       type: String,
-      enum: ["confirmed", "cancelled", "recovered", "pending", "failed"],
+      enum: ["confirmed", "cancelled", "recovered", "pending", "failed", "pre-cancel"],
       required: true,
     },
     orderId: { type: String },

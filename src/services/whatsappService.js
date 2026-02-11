@@ -11,6 +11,7 @@ import qrcode from "qrcode";
 import { WhatsAppAuth } from "../models/WhatsAppAuth.js";
 import { initAuthCreds, BufferJSON, proto } from "@whiskeysockets/baileys";
 import { Merchant } from "../models/Merchant.js";
+import crypto from "crypto";
 
 const logger = pino({ level: "info" });
 const SERVICE_VERSION = "1.0.2-diag"; // To verify deployment
@@ -362,6 +363,7 @@ class WhatsAppService {
                         const { Merchant } = await import("../models/Merchant.js");
                         const { ActivityLog } = await import("../models/ActivityLog.js");
                         const { shopifyService } = await import("./shopifyService.js");
+                        const { Template } = await import("../models/Template.js");
 
                         const merchant = await Merchant.findOne({ shopDomain });
                         if (!merchant) {
@@ -373,26 +375,78 @@ class WhatsAppService {
                             continue;
                         }
 
+                        // PRE-PROCESS: Standardize phone and find ActivityLog
+                        const isLidFormat = fullJid?.includes('@lid');
+                        let log = null;
+
+                        if (isLidFormat && isPollUpdate) {
+                            // Focus on the most recent actionable activity for this customer on this shop
+                            log = await ActivityLog.findOne({
+                                merchant: merchant._id,
+                                type: { $in: ["pending", "pre-cancel"] },
+                                createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) }
+                            }).sort({ createdAt: -1 });
+                        } else {
+                            const phoneSuffix = fromCleaner.slice(-9);
+                            if (phoneSuffix) {
+                                log = await ActivityLog.findOne({
+                                    merchant: merchant._id,
+                                    customerPhone: new RegExp(phoneSuffix + "$"),
+                                    type: { $in: ["pending", "pre-cancel"] }
+                                }).sort({ createdAt: -1 });
+                            }
+                        }
+
                         let activityStatus = null;
                         let tagToAdd = null;
 
-                        // 1. Detect Poll Response (Baileys poll update)
+                        // 1. Detect Intent (Poll or Text)
                         if (isPollUpdate) {
-                            console.log(`[Interaction] Processing as poll update for ${fromRaw}`);
+                            console.log(`[Interaction] Processing poll update from ${fromRaw}`);
+                            const pollUpdate = msg.message.pollUpdateMessage;
+                            const vote = pollUpdate?.vote;
+                            const selectedHashes = vote?.selectedOptions || [];
+                            const firstHash = selectedHashes[0] ? Buffer.from(selectedHashes[0]).toString('hex').toUpperCase() : null;
 
-                            // NOTE: Baileys poll updates are encrypted. 
-                            // For now, we improve the detection: if the customer previously got a cancellation poll,
-                            // or if they used a keyword, we match it. 
-                            // DEFAULT to confirmed ONLY if no other signal (this matches existing behavior but we can improve it)
+                            if (firstHash) {
+                                // A. Check against Hardcoded Verification Hashes (for Pre-Cancel poll)
+                                const stayHash = crypto.createHash('sha256').update("✅ No, Keep Order").digest('hex').toUpperCase();
+                                const cancelHash = crypto.createHash('sha256').update("🗑️ Yes, Cancel Order").digest('hex').toUpperCase();
 
-                            activityStatus = "confirmed";
-                            tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+                                if (firstHash === stayHash) {
+                                    console.log("[Interaction] Match: No, Keep Order (Stay)");
+                                    activityStatus = "confirmed";
+                                    tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+                                } else if (firstHash === cancelHash) {
+                                    console.log("[Interaction] Match: Yes, Cancel Order (Final)");
+                                    activityStatus = "cancelled";
+                                    tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                                } else {
+                                    // B. Check against Merchant's Template Options
+                                    const confirmTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/create" });
+                                    if (confirmTemplate && confirmTemplate.isPoll) {
+                                        for (const option of confirmTemplate.pollOptions) {
+                                            const hash = crypto.createHash('sha256').update(option).digest('hex').toUpperCase();
+                                            if (firstHash === hash) {
+                                                console.log(`[Interaction] Match Template Option: ${option}`);
+                                                if (option.toLowerCase().includes("confirm") || option.toLowerCase().includes("yes") || option.includes("✅")) {
+                                                    activityStatus = "confirmed";
+                                                    tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+                                                } else if (option.toLowerCase().includes("cancel") || option.toLowerCase().includes("no") || option.includes("❌")) {
+                                                    activityStatus = "cancelled";
+                                                    tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                                                }
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
 
-                            // Try to see if they replied with a cancel keyword in addition to poll
-                            const input = text.toLowerCase().trim();
-                            if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi") || input.includes("wrong")) {
-                                activityStatus = "cancelled";
-                                tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                            // C. Fallback: If still undetermined, default to confirmed (safest bet for conversion)
+                            if (!activityStatus) {
+                                activityStatus = "confirmed";
+                                tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
                             }
                         } else {
                             // 2. Basic Keyword Detection (Text messages)
@@ -406,130 +460,103 @@ class WhatsAppService {
                             }
                         }
 
-                        if (activityStatus && tagToAdd) {
-                            console.log(`[Interaction] Matched intent: ${activityStatus}. Looking for recent ActivityLog...`);
+                        // 2. PROCESS INTENT
+                        if (activityStatus && tagToAdd && log && log.orderId) {
+                            console.log(`[Interaction] SUCCESS: Order ${log.orderId}. Intent: ${activityStatus}. Current Log Type: ${log.type}`);
 
-                            let log = null;
+                            const targetPhone = log.customerPhone || fromRaw;
 
-                            // Check if this is an LID format (poll responses often come from LID)
-                            const isLidFormat = fullJid?.includes('@lid');
+                            // A. DOUBLE-CONFIRM FLOW FOR CANCELLATION
+                            if (activityStatus === "cancelled" && log.type === "pending") {
+                                console.log(`[Interaction] Sending Pre-Cancel verification to ${targetPhone}`);
+                                const preCancelMsg = "Are you sure you want to cancel your order? ❌\n\nThis will stop your order from being processed immediately.";
+                                const preCancelOptions = ["✅ No, Keep Order", "🗑️ Yes, Cancel Order"];
 
-                            if (isLidFormat && isPollUpdate) {
-                                // For LID poll responses, find the most recent pending activity for this merchant
-                                console.log(`[Interaction] LID poll detected (${fromRaw}), searching for most recent pending activity...`);
-                                log = await ActivityLog.findOne({
-                                    merchant: merchant._id,
-                                    type: "pending",
-                                    createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) } // Last 48 hours
-                                }).sort({ createdAt: -1 });
+                                await this.sendPoll(shopDomain, targetPhone, preCancelMsg, preCancelOptions);
 
-                                if (log) {
-                                    console.log(`[Interaction] MATCHED LID poll to Order: ${log.orderId}`);
-                                } else {
-                                    // Fallback: search for ANY recent confirmed/pending log
-                                    log = await ActivityLog.findOne({
-                                        merchant: merchant._id,
-                                        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
-                                    }).sort({ createdAt: -1 });
-                                }
-                            } else {
-                                // Normal phone number matching using last 9 digits
-                                const phoneSuffix = fromCleaner.slice(-9);
-                                if (phoneSuffix) {
-                                    console.log(`[Interaction] Searching ActivityLog for phone suffix ${phoneSuffix}`);
-                                    log = await ActivityLog.findOne({
-                                        merchant: merchant._id,
-                                        customerPhone: new RegExp(phoneSuffix + "$")
-                                    }).sort({ createdAt: -1 });
-                                }
+                                log.type = "pre-cancel";
+                                log.message = "Customer clicked Cancel. Verification poll sent. 🛑";
+                                await log.save();
+                                return; // Stop here, wait for second poll response
                             }
 
-                            if (log && log.orderId) {
-                                console.log(`[Interaction] SUCCESS: Found Order ${log.orderId}. Status: ${activityStatus}`);
+                            // B. FINAL PROCESSING (Confirmation or Verified Cancellation)
+                            const isConfirm = activityStatus === "confirmed";
+                            const tagsToRemove = isConfirm
+                                ? [merchant.pendingConfirmTag, merchant.orderCancelTag]
+                                : [merchant.pendingConfirmTag, merchant.orderConfirmTag, "pre-cancel"];
 
-                                const isConfirm = activityStatus === "confirmed";
-                                const tagsToRemove = isConfirm
-                                    ? [merchant.pendingConfirmTag, merchant.orderCancelTag]
-                                    : [merchant.pendingConfirmTag, merchant.orderConfirmTag];
+                            // 1. Attempt Shopify Tagging (Background)
+                            try {
+                                console.log(`[Interaction] Tagging Shopify Order ${log.orderId} as ${activityStatus}...`);
+                                const tagResult = await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
 
-                                // 1. Attempt Shopify Tagging (Background)
-                                try {
-                                    console.log(`[Interaction] Calling shopifyService.addOrderTag for ${log.orderId}...`);
-                                    const tagResult = await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
-                                    console.log(`[Interaction] Tagging result success: ${tagResult.success}`);
-
-                                    if (tagResult.success) {
-                                        log.message = `Customer confirmed via WhatsApp ✅`;
-                                        log.type = activityStatus;
-                                        await log.save();
-                                    }
-                                } catch (tagErr) {
-                                    console.error("[Interaction] Tagging Error (Continuing to reply):", tagErr.message);
+                                if (tagResult.success) {
+                                    log.message = isConfirm ? `Customer confirmed via WhatsApp ✅` : `Customer requested cancellation ❌`;
+                                    log.type = activityStatus;
+                                    await log.save();
                                 }
+                            } catch (tagErr) {
+                                console.error("[Interaction] Tagging Error:", tagErr.message);
+                            }
 
-                                // 2. Send Customer Reply (Always send even if tagging fails)
-                                await WhatsAppService.delay(1000);
+                            // 2. Send Customer Reply
+                            await WhatsAppService.delay(1000);
 
-                                let replyText;
-                                if (isConfirm) {
-                                    try {
-                                        const { Template } = await import("../models/Template.js");
-                                        const confirmTemplate = await Template.findOne({
-                                            merchant: merchant._id,
-                                            event: "orders/confirmed"
-                                        });
-
-                                        if (confirmTemplate) {
-                                            const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
-                                            if (orderData) {
-                                                const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
-                                                replyText = replacePlaceholders(confirmTemplate.message, { order: orderData, merchant });
-                                                console.log(`[Interaction] Using Dynamic Template`);
-                                            } else {
-                                                replyText = merchant.orderConfirmReply || "Thank you! Order confirmed. ✅";
-                                            }
+                            let replyText;
+                            if (isConfirm) {
+                                try {
+                                    const confirmTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/confirmed" });
+                                    if (confirmTemplate) {
+                                        const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
+                                        if (orderData) {
+                                            const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
+                                            replyText = replacePlaceholders(confirmTemplate.message, { order: orderData, merchant });
                                         } else {
                                             replyText = merchant.orderConfirmReply || "Thank you! Order confirmed. ✅";
                                         }
-                                    } catch (err) {
+                                    } else {
                                         replyText = merchant.orderConfirmReply || "Thank you! Order confirmed. ✅";
                                     }
-                                } else {
-                                    replyText = merchant.orderCancelReply || "Order cancelled as requested. ❌";
-                                }
-
-                                // ALWAYS SEND TO REAL PHONE NUMBER, NOT LID
-                                const targetPhone = log.customerPhone || fromRaw;
-                                console.log(`[Interaction] Sending confirmation reply to: ${targetPhone}`);
-                                await this.sendMessage(shopDomain, targetPhone, replyText);
-
-                                // Trigger Admin Alert (2s delay for demo, only if confirmed)
-                                if (isConfirm) {
-                                    await WhatsAppService.delay(2000);
-                                    try {
-                                        const { AutomationSetting } = await import("../models/AutomationSetting.js");
-                                        const { Template } = await import("../models/Template.js");
-                                        const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
-
-                                        if (adminSetting?.enabled && merchant.adminPhoneNumber) {
-                                            const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
-                                            if (adminTemplate) {
-                                                const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
-                                                if (orderData) {
-                                                    const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
-                                                    const { automationService } = await import("./automationService.js");
-                                                    let adminMsg = replacePlaceholders(adminTemplate.message, { order: orderData, merchant });
-                                                    await this.sendMessage(shopDomain, merchant.adminPhoneNumber, adminMsg);
-                                                    await automationService.trackSent(shopDomain, "admin-order-alert");
-                                                }
-                                            }
-                                        }
-                                    } catch (adminErr) {
-                                        console.error("[Interaction] Admin alert error:", adminErr);
-                                    }
+                                } catch (err) {
+                                    replyText = merchant.orderConfirmReply || "Thank you! Order confirmed. ✅";
                                 }
                             } else {
-                                console.warn(`[Interaction] FAIL: No matching ActivityLog found for incoming message from ${fromRaw}`);
+                                replyText = merchant.orderCancelReply || "Order cancelled as requested. ❌";
+                            }
+
+                            console.log(`[Interaction] Sending reply to: ${targetPhone}`);
+                            await this.sendMessage(shopDomain, targetPhone, replyText);
+
+                            // 3. Trigger Admin Alert (only if confirm)
+                            if (isConfirm) {
+                                await WhatsAppService.delay(2000);
+                                try {
+                                    const { AutomationSetting } = await import("../models/AutomationSetting.js");
+                                    const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
+
+                                    if (adminSetting?.enabled && merchant.adminPhoneNumber) {
+                                        const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
+                                        if (adminTemplate) {
+                                            const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
+                                            if (orderData) {
+                                                const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
+                                                const { automationService } = await import("./automationService.js");
+                                                let adminMsg = replacePlaceholders(adminTemplate.message, { order: orderData, merchant });
+                                                await this.sendMessage(shopDomain, merchant.adminPhoneNumber, adminMsg);
+                                                await automationService.trackSent(shopDomain, "admin-order-alert");
+                                            }
+                                        }
+                                    }
+                                } catch (adminErr) {
+                                    console.error("[Interaction] Admin alert error:", adminErr);
+                                }
+                            }
+                        } else {
+                            if (!activityStatus) {
+                                console.warn(`[Interaction] No matching intent for incoming message from ${fromRaw}`);
+                            } else if (!log) {
+                                console.warn(`[Interaction] No matching ActivityLog found for ${fromRaw}`);
                             }
                         }
                     } catch (err) {
