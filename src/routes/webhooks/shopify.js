@@ -228,10 +228,10 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                             console.warn(`[ShopifyWebhook] SKIPPING TAGGING - No shopifyAccessToken found for ${shopDomain}. Please complete Shopify OAuth.`);
                         }
 
-                        // 4. UPDATE DASHBOARD TO GREEN (CONFIRMED)
+                        // 4. UPDATE DASHBOARD TO PENDING (WAITING FOR CUSTOMER)
                         if (activity) {
-                            activity.type = 'confirmed';
-                            activity.message = 'WhatsApp Confirmation Sent ✅';
+                            activity.type = 'pending';
+                            activity.message = 'WhatsApp Message Sent ✅ (Awaiting Customer)';
                             await activity.save();
                         }
                     } else {
@@ -260,7 +260,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     } else if (topic === "orders/cancelled") {
         await logEvent("cancelled", req, shopDomain);
 
-        const cancelSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
+        const cancelSetting = await AutomationSetting.findOne({ shopDomain, type: "cancellation" });
         if (cancelSetting?.enabled && customerPhoneFormatted) {
             const cancelTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/cancelled" });
             if (cancelTemplate) {
@@ -272,6 +272,21 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions);
                 } else {
                     await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
+                }
+            }
+
+            // ADD SHOPIFY TAGS FOR CANCELLATION
+            if (merchant?.shopifyAccessToken) {
+                const orderId = order.id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null);
+                if (orderId) {
+                    console.log(`[ShopifyWebhook] Applying cancel tag to order ${orderId}`);
+                    await shopifyService.addOrderTag(
+                        shopDomain,
+                        merchant.shopifyAccessToken,
+                        orderId,
+                        merchant.orderCancelTag || "Order Cancelled",
+                        [merchant.pendingConfirmTag, merchant.orderConfirmTag]
+                    );
                 }
             }
         }

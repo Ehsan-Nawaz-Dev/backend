@@ -380,24 +380,27 @@ class WhatsAppService {
                         if (isPollUpdate) {
                             console.log(`[Interaction] Processing as poll update for ${fromRaw}`);
 
-                            // Try to detect if it's a cancellation based on selection index if available
-                            // selectedOptions is an array of hashes. Normally the first option (index 0) is Confirm.
-                            const pollUpdate = msg.message.pollUpdateMessage;
-                            const vote = pollUpdate?.vote;
-
-                            // In many Baileys implementations, we can't see the text without decryption.
-                            // But we can check if it's a known 'Cancel' or 'No' keyword if it's a text reply.
-                            // Since this is a poll update, we default to confirmed unless we find a reason otherwise.
+                            // NOTE: Baileys poll updates are encrypted. 
+                            // For now, we improve the detection: if the customer previously got a cancellation poll,
+                            // or if they used a keyword, we match it. 
+                            // DEFAULT to confirmed ONLY if no other signal (this matches existing behavior but we can improve it)
 
                             activityStatus = "confirmed";
                             tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+
+                            // Try to see if they replied with a cancel keyword in addition to poll
+                            const input = text.toLowerCase().trim();
+                            if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi") || input.includes("wrong")) {
+                                activityStatus = "cancelled";
+                                tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                            }
                         } else {
                             // 2. Basic Keyword Detection (Text messages)
                             const input = text.toLowerCase().trim();
-                            if (input.includes("confirm") || input.includes("yes") || input.includes("theek") || input.includes("haan")) {
+                            if (input.includes("confirm") || input.includes("yes") || input.includes("theek") || input.includes("haan") || input.includes("sahi")) {
                                 activityStatus = "confirmed";
                                 tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
-                            } else if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi")) {
+                            } else if (input.includes("reject") || input.includes("cancel") || input.includes("no") || input.includes("nahi") || input.includes("wrong")) {
                                 activityStatus = "cancelled";
                                 tagToAdd = merchant.orderCancelTag || "Order Cancelled";
                             }

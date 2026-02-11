@@ -44,7 +44,7 @@ router.post("/", async (req, res) => {
           const log = await ActivityLog.findOne({
             merchant: merchant._id,
             customerPhone: new RegExp(customerPhone.slice(-10)),
-            type: "confirmed"
+            type: "pending"
           }).sort({ createdAt: -1 });
 
           if (log && log.orderId) {
