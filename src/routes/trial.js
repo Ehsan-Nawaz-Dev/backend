@@ -6,7 +6,8 @@ const router = Router();
 // POST /api/trial/activate
 // Activates the 10-message trial using user details
 router.post("/activate", async (req, res) => {
-    const { shop, name, email, phone } = req.body;
+    const { shop } = req.query;
+    const { name, email, phone } = req.body;
 
     if (!shop) {
         return res.status(400).json({ error: "Shop domain is required" });
