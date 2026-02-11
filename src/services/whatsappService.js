@@ -432,6 +432,7 @@ class WhatsAppService {
                                     if (confirmTemplate && confirmTemplate.isPoll) {
                                         for (const option of confirmTemplate.pollOptions) {
                                             const hash = crypto.createHash('sha256').update(option).digest('hex').toUpperCase();
+                                            console.log(`[Interaction] Comparing hash for option "${option}": ${hash} vs ${firstHash}`);
                                             if (firstHash === hash) {
                                                 console.log(`[Interaction] Match Confirm Option: ${option}`);
                                                 if (option.toLowerCase().includes("confirm") || option.toLowerCase().includes("yes") || option.includes("✅")) {
@@ -448,8 +449,47 @@ class WhatsAppService {
                                 }
                             }
 
-                            // B. Fallback: If still undetermined (e.g. hash mismatch), default to confirmed for safety
+                            // B. Fallback: If hash didn't match, try to infer from poll index
+                            if (!activityStatus && msg.message?.pollUpdateMessage) {
+                                console.warn(`[Interaction] Hash mismatch! Attempting fallback detection...`);
+                                const confirmTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/create" });
+
+                                // Try to use vote index (0 = first option, 1 = second option, etc.)
+                                // Most merchants put "Confirm" first and "Cancel" second
+                                if (confirmTemplate?.pollOptions?.length >= 2) {
+                                    // Analyze which option is more likely to be Cancel based on text
+                                    const option1 = confirmTemplate.pollOptions[0].toLowerCase();
+                                    const option2 = confirmTemplate.pollOptions[1].toLowerCase();
+
+                                    const option1IsCancel = option1.includes("cancel") || option1.includes("no");
+                                    const option2IsCancel = option2.includes("cancel") || option2.includes("no");
+
+                                    console.log(`[Interaction] Poll options analysis: Option1="${confirmTemplate.pollOptions[0]}" (isCancel: ${option1IsCancel}), Option2="${confirmTemplate.pollOptions[1]}" (isCancel: ${option2IsCancel})`);
+
+                                    // If we can determine which is cancel, use that
+                                    if (option1IsCancel && !option2IsCancel) {
+                                        console.log(`[Interaction] FALLBACK: Assuming Option 1 hash = Cancel`);
+                                        activityStatus = "cancelled";
+                                        tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                                    } else if (option2IsCancel && !option1IsCancel) {
+                                        console.log(`[Interaction] FALLBACK: Assuming Option 2 hash = Cancel`);
+                                        activityStatus = "cancelled";
+                                        tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                                    } else {
+                                        console.warn(`[Interaction] FALLBACK FAILED: Cannot determine which option is cancel. Defaulting to confirmed.`);
+                                        activityStatus = "confirmed";
+                                        tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+                                    }
+                                } else {
+                                    console.warn(`[Interaction] No poll options found for fallback. Defaulting to confirmed.`);
+                                    activityStatus = "confirmed";
+                                    tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+                                }
+                            }
+
+                            // C. Ultimate Fallback: default to confirmed for safety
                             if (!activityStatus) {
+                                console.warn(`[Interaction] All detection methods failed. Defaulting to confirmed.`);
                                 activityStatus = "confirmed";
                                 tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
                             }
