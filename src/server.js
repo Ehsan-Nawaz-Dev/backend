@@ -58,8 +58,9 @@ app.use("/auth", (req, res) => {
   res.redirect(`/api/auth/shopify${query ? '?' + query : ''}`);
 });
 
-// API routes
+// API routes - Support both lowercase and capitalized versions for maximum frontend compatibility
 app.use("/api", apiRouter);
+app.use("/Api", apiRouter);
 
 // Export app for serverless
 export { app };
