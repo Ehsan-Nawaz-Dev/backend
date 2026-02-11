@@ -97,7 +97,7 @@ router.get("/callback", async (req, res) => {
 
     // 2. Create or Update Merchant Record
     const merchantData = {
-      shopDomain: shop,
+      shopDomain: shop.toLowerCase(),
       shopifyAccessToken: accessToken,
       storeName: shopData?.name || shop,
       contactName: shopData?.shop_owner || null,
@@ -115,7 +115,9 @@ router.get("/callback", async (req, res) => {
       installedAt: new Date()
     };
 
-    const existingMerchant = await Merchant.findOne({ shopDomain: shop });
+    const existingMerchant = await Merchant.findOne({
+      shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
+    });
     let merchant;
     let isNewMerchant = !existingMerchant;
 

@@ -17,11 +17,17 @@ router.post('/create', async (req, res) => {
     if (!planConfig) return res.status(400).json({ message: 'Invalid plan selected' });
 
     try {
-        const merchant = await Merchant.findOne({ shopDomain: shop });
+        const merchant = await Merchant.findOne({
+            shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
+        });
 
         if (!merchant) {
-            console.error(`[Billing] Merchant ${shop} not found in database`);
-            return res.status(404).json({ message: 'Merchant not found. Please reinstall the app.' });
+            console.error(`[Billing] Merchant ${shop} not found in database. Looking for shop: ${shop}`);
+            // Let's also log a few merchants to see what's in there
+            const someMerchants = await Merchant.find().limit(3);
+            console.log(`[Billing] Sample merchants in DB:`, someMerchants.map(m => m.shopDomain));
+
+            return res.status(404).json({ message: 'Merchant not found. Please logout and login again.' });
         }
 
         // --- SPECIAL HANDLING FOR FREE PLAN ---
@@ -104,7 +110,9 @@ router.get('/confirm', async (req, res) => {
     const { shop, charge_id, plan } = req.query;
 
     try {
-        const merchant = await Merchant.findOne({ shopDomain: shop });
+        const merchant = await Merchant.findOne({
+            shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
+        });
         if (!merchant || !merchant.shopifyAccessToken) {
             return res.status(404).send('Merchant or access token not found');
         }
@@ -134,10 +142,15 @@ router.get('/confirm', async (req, res) => {
 router.get('/status', async (req, res) => {
     const { shop } = req.query;
     try {
-        const merchant = await Merchant.findOne({ shopDomain: shop });
+        const merchant = await Merchant.findOne({
+            shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
+        });
 
         // If no merchant yet, return none
-        if (!merchant) return res.json({ plan: 'none', status: 'none', usage: 0, limit: 10 });
+        if (!merchant) {
+            console.log(`[Billing] Status requested for unknown shop: ${shop}`);
+            return res.json({ plan: 'none', status: 'none', usage: 0, limit: 10 });
+        }
 
         const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
         const limit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
