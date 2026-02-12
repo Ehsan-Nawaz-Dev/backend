@@ -64,9 +64,9 @@ class WhatsAppService {
         const memStore = this.messageStores.get(shopDomain);
         if (memStore && key?.id) {
             const msg = memStore.get(key.id);
-            if (msg?.message) {
+            if (msg) {
                 console.log(`[PollStore] Found message ${key.id} in memory`);
-                return msg.message;
+                return msg; // Return FULL message struct for decryption
             }
         }
 
@@ -79,7 +79,7 @@ class WhatsAppService {
                     const fullMsg = JSON.parse(stored.messageData, BufferJSON.reviver);
                     // Cache it back in memory for future lookups
                     this.storeMessage(shopDomain, fullMsg);
-                    return fullMsg.message || undefined;
+                    return fullMsg || undefined; // Return FULL message struct for decryption
                 }
             } catch (err) {
                 console.error(`[PollStore] Error loading poll message from MongoDB:`, err.message);
@@ -302,7 +302,8 @@ class WhatsAppService {
                 browser: ["Whatomatic Backend", "Chrome", "1.1.0"],
                 getMessage: async (key) => {
                     // Required by Baileys for poll vote decryption
-                    return this.getMessageFromStore(shopDomain, key);
+                    const fullMsg = await this.getMessageFromStore(shopDomain, key);
+                    return fullMsg?.message || undefined;
                 },
             });
 
