@@ -1,15 +1,19 @@
 import { Router } from 'express';
 import axios from 'axios';
 import { Merchant } from '../models/Merchant.js';
-import { Plan } from '../models/Plan.js'; // Import Model
+import { Plan } from '../models/Plan.js';
 
 const router = Router();
 const SHOPIFY_APP_URL = (process.env.SHOPIFY_APP_URL || "http://localhost:5000").replace(/\/$/, "");
+const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
+const API_VERSION = "2025-01";
 
-// Create Charge
+// ============================================================
+// POST /billing/create — Create a subscription or activate free plan
+// ============================================================
 router.post('/create', async (req, res) => {
     const { shop } = req.query;
-    const { plan: planId } = req.body; // planId e.g. 'starter'
+    const { plan: planId } = req.body;
     console.log(`[Billing] Creating charge for shop: ${shop}, plan: ${planId}`);
 
     // Fetch Plan from DB
@@ -22,73 +26,84 @@ router.post('/create', async (req, res) => {
         });
 
         if (!merchant) {
-            console.error(`[Billing] Merchant ${shop} not found in database. Looking for shop: ${shop}`);
-            // Let's also log a few merchants to see what's in there
-            const someMerchants = await Merchant.find().limit(3);
-            console.log(`[Billing] Sample merchants in DB:`, someMerchants.map(m => m.shopDomain));
-
-            return res.status(404).json({ message: 'Merchant not found. Please logout and login again.' });
+            console.error(`[Billing] Merchant ${shop} not found in database.`);
+            return res.status(404).json({ message: 'Merchant not found. Please reinstall the app.' });
         }
 
         // --- SPECIAL HANDLING FOR FREE PLAN ---
         if (planConfig.price === 0) {
-            console.log(`[Billing] Free plan selected. Skipping Shopify Charge.`);
+            console.log(`[Billing] Free plan selected. Skipping Shopify charge.`);
             merchant.plan = planId;
             merchant.billingStatus = 'active';
+            merchant.shopifySubscriptionId = null;
             await merchant.save();
 
-            // Redirect to billing success page
-            const apiKey = process.env.SHOPIFY_API_KEY;
             const shopName = shop.replace(".myshopify.com", "");
-            if (apiKey) {
-                return res.json({ confirmationUrl: `https://admin.shopify.com/store/${shopName}/apps/${apiKey}/billing-success?shop=${shop}` });
+            if (SHOPIFY_API_KEY) {
+                return res.json({ confirmationUrl: `https://admin.shopify.com/store/${shopName}/apps/${SHOPIFY_API_KEY}/billing-success?shop=${shop}` });
             }
             const frontendUrl = process.env.FRONTEND_APP_URL || "https://whatomatic.vercel.app";
             return res.json({ confirmationUrl: `${frontendUrl}/billing-success?shop=${shop}` });
         }
 
-        // 3. Error if Access Token is missing
+        // --- PAID PLAN: Use GraphQL appSubscriptionCreate ---
         if (!merchant.shopifyAccessToken) {
             console.error(`[Billing] Access token missing for ${shop}`);
             return res.status(403).json({ message: 'Shopify token missing. Please reinstall the app.' });
         }
 
-        // ... existing diagnostics and charge creation code ...
-        // ... (Since I am editing a chunk, I need to include the rest of the file logic that follows or careful replacement)
+        // Build the return URL for after Shopify approval
+        const returnUrl = `${SHOPIFY_APP_URL}/api/billing/confirm?shop=${shop}&plan=${planId}`;
 
-        // Diagnostics: Verify token works and check scopes
-        try {
-            const scopeResponse = await axios.get(`https://${shop}/admin/oauth/access_scopes.json`, {
-                headers: { 'X-Shopify-Access-Token': merchant.shopifyAccessToken }
-            });
-            const scopes = scopeResponse.data.access_scopes.map(s => s.handle);
-            console.log(`[Billing] Diagnostics: Active Scopes for ${shop}:`, scopes.join(", "));
-
-            if (scopes.includes('write_billing')) {
-                console.log(`[Billing] SUCCESS: 'write_billing' scope is present for ${shop}`);
-            } else {
-                console.warn(`[Billing] CRITICAL: 'write_billing' scope is MISSING for ${shop}. 403 Forbidden is expected until merchant re-authorizes.`);
-            }
-        } catch (diagErr) {
-            // Ignore diagnostics error
-        }
-
-        // 4. Create Charge
-        const chargeData = {
-            recurring_application_charge: {
+        // GraphQL mutation for appSubscriptionCreate
+        const graphqlQuery = {
+            query: `
+                mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $test: Boolean, $lineItems: [AppSubscriptionLineItemInput!]!) {
+                    appSubscriptionCreate(
+                        name: $name
+                        returnUrl: $returnUrl
+                        test: true
+                        lineItems: $lineItems
+                    ) {
+                        confirmationUrl
+                        appSubscription {
+                            id
+                            status
+                        }
+                        userErrors {
+                            field
+                            message
+                        }
+                    }
+                }
+            `,
+            variables: {
                 name: `${planConfig.name} Plan`,
-                price: planConfig.price,
-                return_url: `${SHOPIFY_APP_URL}/api/billing/confirm?shop=${shop}&plan=${planId}`,
-                test: true
+                returnUrl: returnUrl,
+                test: true,
+                lineItems: [
+                    {
+                        plan: {
+                            appRecurringPricingDetails: {
+                                price: {
+                                    amount: planConfig.price,
+                                    currencyCode: (planConfig.currency || 'USD').toUpperCase()
+                                },
+                                interval: "EVERY_30_DAYS"
+                            }
+                        }
+                    }
+                ]
             }
         };
 
-        const apiVersion = "2025-01";
-        const chargeUrl = `https://${shop}/admin/api/${apiVersion}/recurring_application_charges.json`;
+        console.log(`[Billing] Calling GraphQL appSubscriptionCreate for ${shop}...`);
+        console.log(`[Billing] Plan: ${planConfig.name}, Price: ${planConfig.price} ${planConfig.currency || 'USD'}`);
+        console.log(`[Billing] Return URL: ${returnUrl}`);
 
         const response = await axios.post(
-            chargeUrl,
-            chargeData,
+            `https://${shop}/admin/api/${API_VERSION}/graphql.json`,
+            graphqlQuery,
             {
                 headers: {
                     'X-Shopify-Access-Token': merchant.shopifyAccessToken,
@@ -96,10 +111,37 @@ router.post('/create', async (req, res) => {
                 }
             }
         );
-        res.json({ confirmationUrl: response.data.recurring_application_charge.confirmation_url });
+
+        const result = response.data?.data?.appSubscriptionCreate;
+
+        // Check for user errors
+        if (result?.userErrors?.length > 0) {
+            console.error(`[Billing] GraphQL userErrors:`, result.userErrors);
+            return res.status(400).json({
+                message: 'Failed to create subscription',
+                errors: result.userErrors
+            });
+        }
+
+        // Check for confirmation URL
+        if (!result?.confirmationUrl) {
+            console.error(`[Billing] No confirmationUrl returned. Full response:`, JSON.stringify(response.data, null, 2));
+            return res.status(500).json({ message: 'Shopify did not return a confirmation URL' });
+        }
+
+        // Save subscription ID for later verification
+        if (result.appSubscription?.id) {
+            merchant.shopifySubscriptionId = result.appSubscription.id;
+            await merchant.save();
+            console.log(`[Billing] Saved subscription ID: ${result.appSubscription.id}`);
+        }
+
+        console.log(`[Billing] ✅ Subscription created. Confirmation URL ready for ${shop}`);
+        res.json({ confirmationUrl: result.confirmationUrl });
+
     } catch (error) {
         console.error('--- BILLING ERROR DETAIL ---');
-        console.error(error.message);
+        console.error(error.response?.data || error.message);
         res.status(500).json({
             message: 'Failed to create charge',
             detail: error.response?.data || error.message
@@ -107,9 +149,12 @@ router.post('/create', async (req, res) => {
     }
 });
 
-// Confirm Charge (Return URL)
+// ============================================================
+// GET /billing/confirm — Return URL after Shopify approval
+// ============================================================
 router.get('/confirm', async (req, res) => {
-    const { shop, charge_id, plan } = req.query;
+    const { shop, plan, charge_id } = req.query;
+    console.log(`[Billing] Confirm callback for shop: ${shop}, plan: ${plan}, charge_id: ${charge_id || 'N/A'}`);
 
     try {
         const merchant = await Merchant.findOne({
@@ -119,34 +164,81 @@ router.get('/confirm', async (req, res) => {
             return res.status(404).send('Merchant or access token not found');
         }
 
-        // Activate the charge
-        const apiVersion = "2025-01";
-        await axios.post(
-            `https://${shop}/admin/api/${apiVersion}/recurring_application_charges/${charge_id}/activate.json`,
-            {},
-            { headers: { 'X-Shopify-Access-Token': merchant.shopifyAccessToken } }
-        );
+        // Verify subscription status via GraphQL
+        if (merchant.shopifySubscriptionId) {
+            try {
+                const verifyQuery = {
+                    query: `
+                        query {
+                            node(id: "${merchant.shopifySubscriptionId}") {
+                                ... on AppSubscription {
+                                    id
+                                    status
+                                    name
+                                }
+                            }
+                        }
+                    `
+                };
+
+                const verifyResponse = await axios.post(
+                    `https://${shop}/admin/api/${API_VERSION}/graphql.json`,
+                    verifyQuery,
+                    {
+                        headers: {
+                            'X-Shopify-Access-Token': merchant.shopifyAccessToken,
+                            'Content-Type': 'application/json'
+                        }
+                    }
+                );
+
+                const subscription = verifyResponse.data?.data?.node;
+                console.log(`[Billing] Subscription status: ${subscription?.status} for ${shop}`);
+
+                if (subscription?.status === 'ACTIVE') {
+                    console.log(`[Billing] ✅ Subscription ACTIVE for ${shop}`);
+                } else if (subscription?.status === 'DECLINED') {
+                    console.log(`[Billing] ❌ Subscription DECLINED by ${shop}`);
+                    return res.redirect(getBillingRedirectUrl(shop, 'declined'));
+                }
+            } catch (verifyErr) {
+                console.warn(`[Billing] Could not verify subscription status:`, verifyErr.message);
+                // Continue anyway - merchant approved, so activate
+            }
+        }
+
+        // If we also received a charge_id (REST fallback), activate it
+        if (charge_id) {
+            try {
+                await axios.post(
+                    `https://${shop}/admin/api/${API_VERSION}/recurring_application_charges/${charge_id}/activate.json`,
+                    {},
+                    { headers: { 'X-Shopify-Access-Token': merchant.shopifyAccessToken } }
+                );
+                console.log(`[Billing] REST charge ${charge_id} activated as fallback.`);
+            } catch (activateErr) {
+                console.warn(`[Billing] REST charge activation error (non-fatal):`, activateErr.message);
+            }
+        }
 
         // Update DB
         merchant.plan = plan;
         merchant.billingStatus = 'active';
         await merchant.save();
+        console.log(`[Billing] ✅ Plan '${plan}' activated for ${shop}`);
 
         // Redirect to billing success page
-        const apiKey = process.env.SHOPIFY_API_KEY;
-        const shopName = shop.replace(".myshopify.com", "");
-        if (apiKey) {
-            res.redirect(`https://admin.shopify.com/store/${shopName}/apps/${apiKey}/billing-success?shop=${shop}`);
-        } else {
-            const frontendUrl = process.env.FRONTEND_APP_URL || "https://whatomatic.vercel.app";
-            res.redirect(`${frontendUrl}/billing-success?shop=${shop}`);
-        }
+        res.redirect(getBillingRedirectUrl(shop, 'success'));
+
     } catch (error) {
         console.error('Activation Error:', error.response?.data || error.message);
         res.status(500).send('Billing activation failed');
     }
 });
 
+// ============================================================
+// GET /billing/status — Check current subscription status
+// ============================================================
 router.get('/status', async (req, res) => {
     const { shop } = req.query;
     try {
@@ -154,7 +246,6 @@ router.get('/status', async (req, res) => {
             shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
         });
 
-        // If no merchant yet, return none
         if (!merchant) {
             console.log(`[Billing] Status requested for unknown shop: ${shop}`);
             return res.json({ plan: 'none', status: 'none', usage: 0, limit: 10 });
@@ -163,7 +254,6 @@ router.get('/status', async (req, res) => {
         const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
         const limit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
 
-        // Return current plan, active status, usage and limit
         res.json({
             plan: merchant.plan || 'free',
             status: merchant.billingStatus || 'none',
@@ -174,5 +264,19 @@ router.get('/status', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch status' });
     }
 });
+
+// ============================================================
+// Helper: Build redirect URL after billing
+// ============================================================
+function getBillingRedirectUrl(shop, status) {
+    const shopName = shop.replace(".myshopify.com", "");
+    const route = status === 'success' ? 'billing-success' : 'dashboard?tab=billing&billing=declined';
+
+    if (SHOPIFY_API_KEY) {
+        return `https://admin.shopify.com/store/${shopName}/apps/${SHOPIFY_API_KEY}/${route}?shop=${shop}`;
+    }
+    const frontendUrl = process.env.FRONTEND_APP_URL || "https://whatomatic.vercel.app";
+    return `${frontendUrl}/${route}?shop=${shop}`;
+}
 
 export default router;

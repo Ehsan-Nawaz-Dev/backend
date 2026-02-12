@@ -35,6 +35,7 @@ const MerchantSchema = new mongoose.Schema(
     // Billing Status
     plan: { type: String, default: 'free' },
     billingStatus: { type: String, default: 'inactive' },
+    shopifySubscriptionId: { type: String }, // GraphQL subscription ID
 
     // Trial & Usage System
     trialActivated: { type: Boolean, default: false },
