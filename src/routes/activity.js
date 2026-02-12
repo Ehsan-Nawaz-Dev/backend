@@ -1,12 +1,31 @@
 import { Router } from "express";
 import { ActivityLog } from "../models/ActivityLog.js";
+import { Merchant } from "../models/Merchant.js";
 
 const router = Router();
 
-// For now, shop filtering is TODO; we just return recent activity logs.
+// GET /activity — Returns recent activity logs filtered by shop
 router.get("/", async (req, res) => {
   try {
-    const logs = await ActivityLog.find()
+    const { shop } = req.query;
+
+    let filter = {};
+
+    // If shop is provided, find the merchant and filter by their ID
+    if (shop) {
+      const merchant = await Merchant.findOne({
+        shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
+      });
+
+      if (merchant) {
+        filter.merchant = merchant._id;
+      } else {
+        // No merchant found for this shop — return empty
+        return res.json([]);
+      }
+    }
+
+    const logs = await ActivityLog.find(filter)
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();

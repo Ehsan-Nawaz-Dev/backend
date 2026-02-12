@@ -1,25 +1,49 @@
 import { Router } from "express";
 import { ActivityLog } from "../models/ActivityLog.js";
+import { Merchant } from "../models/Merchant.js";
 
 const router = Router();
 
-// Basic analytics summary derived from ActivityLog
-// NOTE: For now this is global (no shop filter) and time range is last 30 days.
+// Basic analytics summary derived from ActivityLog — filtered by shop
 router.get("/", async (req, res) => {
   try {
+    const { shop } = req.query;
     const since = new Date();
     since.setDate(since.getDate() - 30);
 
-    const logs = await ActivityLog.find({ createdAt: { $gte: since } }).lean();
+    let filter = { createdAt: { $gte: since } };
+    let dailyFilter = {};
+
+    // Filter by shop if provided
+    if (shop) {
+      const merchant = await Merchant.findOne({
+        shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
+      });
+
+      if (merchant) {
+        filter.merchant = merchant._id;
+        dailyFilter.merchant = merchant._id;
+      } else {
+        // No merchant found — return empty analytics
+        return res.json({
+          messagesSent: 0, recoveredCarts: 0, confirmedOrders: 0,
+          responseRate: 0, abandonedCheckouts: 0, delivered: 0,
+          replies: 0, recoveryRate: 0, cancelled: 0, periodDays: 30,
+          dailyStats: []
+        });
+      }
+    }
+
+    const logs = await ActivityLog.find(filter).lean();
 
     const totalMessages = logs.length;
     const confirmed = logs.filter((l) => l.type === "confirmed").length;
     const recovered = logs.filter((l) => l.type === "recovered").length;
     const cancelled = logs.filter((l) => l.type === "cancelled").length;
 
-    const abandonedCheckouts = recovered + cancelled; // rough proxy
-    const delivered = totalMessages; // until we track delivery explicitly
-    const replies = confirmed + recovered; // any positive engagement
+    const abandonedCheckouts = recovered + cancelled;
+    const delivered = totalMessages;
+    const replies = confirmed + recovered;
 
     const responseRate = delivered > 0 ? Math.round((replies / delivered) * 100) : 0;
     const recoveryRate = abandonedCheckouts > 0 ? Math.round((recovered / abandonedCheckouts) * 100) : 0;
@@ -28,12 +52,13 @@ router.get("/", async (req, res) => {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
+    const matchStage = {
+      createdAt: { $gte: sevenDaysAgo },
+      ...dailyFilter
+    };
+
     const dailyAggregation = await ActivityLog.aggregate([
-      {
-        $match: {
-          createdAt: { $gte: sevenDaysAgo }
-        }
-      },
+      { $match: matchStage },
       {
         $group: {
           _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
