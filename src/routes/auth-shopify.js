@@ -174,14 +174,13 @@ router.get("/callback", async (req, res) => {
 
     console.log(`[OAuth] ✅ Automatic setup COMPLETE for ${shop}`);
 
-    // Redirect to frontend dashboard (including host for App Bridge)
-    const host = req.query.host;
-    const redirectUrl = new URL(FRONTEND_APP_URL);
-    redirectUrl.searchParams.append("shop", shop);
-    if (host) redirectUrl.searchParams.append("host", host);
-    redirectUrl.searchParams.append("installed", "true");
+    // Redirect to Shopify Admin Embedded App
+    // We redirect to the /dashboard route within the embedded app context to avoid 404s at root
+    const shopName = shop.replace(".myshopify.com", "");
+    const adminUrl = `https://admin.shopify.com/store/${shopName}/apps/${SHOPIFY_API_KEY}/dashboard?shop=${shop}&host=${host}&installed=true`;
 
-    res.redirect(redirectUrl.toString());
+    console.log(`[OAuth] Redirecting to: ${adminUrl}`);
+    res.redirect(adminUrl);
 
   } catch (error) {
     console.error("[OAuth] Error during setup:", error.response?.data || error.message);
