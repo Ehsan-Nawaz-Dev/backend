@@ -12,6 +12,7 @@ import qrcode from "qrcode";
 import { WhatsAppAuth } from "../models/WhatsAppAuth.js";
 import { initAuthCreds, BufferJSON, proto } from "@whiskeysockets/baileys";
 import { Merchant } from "../models/Merchant.js";
+import { PollMessage } from "../models/PollMessage.js";
 import crypto from "crypto";
 
 const logger = pino({ level: "info" });
@@ -25,7 +26,7 @@ class WhatsAppService {
         this.messageStores = new Map(); // shopDomain -> Map of msgId -> message (for poll decryption)
     }
 
-    // Store a message in the in-memory store (for poll vote decryption)
+    // Store a message in the in-memory cache (for poll vote decryption)
     storeMessage(shopDomain, msg) {
         if (!this.messageStores.has(shopDomain)) {
             this.messageStores.set(shopDomain, new Map());
@@ -39,13 +40,53 @@ class WhatsAppService {
         }
     }
 
-    // Get a stored message by key (used by Baileys for poll decryption)
-    getMessageFromStore(shopDomain, key) {
-        const store = this.messageStores.get(shopDomain);
-        if (store && key?.id) {
-            const msg = store.get(key.id);
-            return msg?.message || undefined;
+    // Persist a poll creation message to MongoDB (survives server restarts)
+    async storePollMessage(shopDomain, msg, customerPhone) {
+        try {
+            // Store in memory too
+            this.storeMessage(shopDomain, msg);
+            // Persist to MongoDB using BufferJSON to handle Buffers
+            const messageData = JSON.stringify(msg, BufferJSON.replacer);
+            await PollMessage.findOneAndUpdate(
+                { shopDomain, messageKeyId: msg.key.id },
+                { shopDomain, messageKeyId: msg.key.id, messageData, customerPhone },
+                { upsert: true }
+            );
+            console.log(`[PollStore] Saved poll message ${msg.key.id} to MongoDB for ${shopDomain}`);
+        } catch (err) {
+            console.error(`[PollStore] Error saving poll message to MongoDB:`, err.message);
         }
+    }
+
+    // Get a stored message by key — check memory first, then MongoDB
+    async getMessageFromStore(shopDomain, key) {
+        // 1. Check in-memory cache first
+        const memStore = this.messageStores.get(shopDomain);
+        if (memStore && key?.id) {
+            const msg = memStore.get(key.id);
+            if (msg?.message) {
+                console.log(`[PollStore] Found message ${key.id} in memory`);
+                return msg.message;
+            }
+        }
+
+        // 2. Fall back to MongoDB
+        if (key?.id) {
+            try {
+                const stored = await PollMessage.findOne({ shopDomain, messageKeyId: key.id });
+                if (stored) {
+                    console.log(`[PollStore] Found message ${key.id} in MongoDB, restoring...`);
+                    const fullMsg = JSON.parse(stored.messageData, BufferJSON.reviver);
+                    // Cache it back in memory for future lookups
+                    this.storeMessage(shopDomain, fullMsg);
+                    return fullMsg.message || undefined;
+                }
+            } catch (err) {
+                console.error(`[PollStore] Error loading poll message from MongoDB:`, err.message);
+            }
+        }
+
+        console.warn(`[PollStore] Message ${key?.id} NOT found in memory or MongoDB`);
         return undefined;
     }
 
@@ -368,8 +409,12 @@ class WhatsAppService {
                 for (const msg of m.messages) {
                     if (!msg.message) continue;
 
-                    // Store ALL messages (including fromMe polls) for poll vote decryption
+                    // Store ALL messages in memory for poll vote decryption
                     this.storeMessage(shopDomain, msg);
+                    // Also persist outgoing poll creation messages to MongoDB
+                    if (msg.key.fromMe && (msg.message?.pollCreationMessage || msg.message?.pollCreationMessageV3)) {
+                        this.storePollMessage(shopDomain, msg, msg.key.remoteJid?.split("@")[0].split(":")[0] || "");
+                    }
 
                     // Skip processing our own outgoing messages
                     if (msg.key.fromMe) continue;
@@ -470,7 +515,7 @@ class WhatsAppService {
                             try {
                                 const sock = this.sockets.get(shopDomain);
                                 if (sock && pollCreationKey) {
-                                    const pollCreationMsg = this.getMessageFromStore(shopDomain, pollCreationKey);
+                                    const pollCreationMsg = await this.getMessageFromStore(shopDomain, pollCreationKey);
 
                                     if (pollCreationMsg) {
                                         console.log(`[Interaction] Found original poll message in store, attempting Baileys decryption...`);
@@ -964,8 +1009,8 @@ class WhatsAppService {
             });
             // Store the sent poll message so we can decrypt vote responses later
             if (sentMsg) {
-                this.storeMessage(shopDomain, sentMsg);
-                console.log(`[WhatsApp] Poll sent and stored (key: ${sentMsg.key?.id}) for vote decryption`);
+                await this.storePollMessage(shopDomain, sentMsg, formattedNumber);
+                console.log(`[WhatsApp] Poll sent and stored in MongoDB (key: ${sentMsg.key?.id}) for vote decryption`);
             }
             console.log(`[WhatsApp] Poll sent successfully to ${formattedNumber}`);
 
