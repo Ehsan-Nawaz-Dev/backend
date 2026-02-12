@@ -72,6 +72,7 @@ router.get("/callback", async (req, res) => {
     console.log("[OAuth] HMAC validated successfully");
   }
 
+  let accessToken;
   try {
     // Exchange code for access token
     const tokenResponse = await axios.post(`https://${shop}/admin/oauth/access_token`, {
@@ -79,12 +80,32 @@ router.get("/callback", async (req, res) => {
       client_secret: SHOPIFY_API_SECRET,
       code
     });
-
-    const accessToken = tokenResponse.data.access_token;
+    accessToken = tokenResponse.data.access_token;
     console.log(`[OAuth] Got access token for ${shop}`);
+  } catch (tokenError) {
+    // Handle "authorization code was not found or was already used"
+    console.warn(`[OAuth] Failed to exchange token: ${tokenError.response?.data?.error_description || tokenError.message}`);
 
-    // ===== AUTOMATIC SETUP STARTS HERE =====
+    // Check if we already have a valid merchant token from the FIRST request
+    const existing = await Merchant.findOne({
+      shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
+    });
 
+    if (existing && existing.shopifyAccessToken) {
+      console.log(`[OAuth] RECOVERY: Merchant ${shop} already has a token. Treating simply as re-auth/duplicate request.`);
+      accessToken = existing.shopifyAccessToken;
+    } else {
+      // Genuine error - no token exists
+      console.error("[OAuth] FATAL: Code invalid and no existing token.");
+      return res.status(500).send("Authentication failed. Please try installing again via the App Store.");
+    }
+  }
+
+  // Proceed with setup (now using accessToken, whether new or recovered)
+
+  // ===== AUTOMATIC SETUP STARTS HERE =====
+
+  try {
     // 1. Fetch Shop Details
     let shopData = null;
     try {
@@ -176,6 +197,7 @@ router.get("/callback", async (req, res) => {
 
     // Redirect to Shopify Admin Embedded App
     // We redirect to the /dashboard route within the embedded app context to avoid 404s at root
+    const host = req.query.host;
     const shopName = shop.replace(".myshopify.com", "");
     const adminUrl = `https://admin.shopify.com/store/${shopName}/apps/${SHOPIFY_API_KEY}/dashboard?shop=${shop}&host=${host}&installed=true`;
 
