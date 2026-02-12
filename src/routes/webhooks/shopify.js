@@ -216,12 +216,34 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
                         if (updatedMerchant?.shopifyAccessToken) {
                             console.log(`[ShopifyWebhook] Applying pending tag to order ${orderId}`);
+
+                            // Helper to ensure emoji exists
+                            const formatTag = (tag, defaultText, emoji) => {
+                                const final = tag || defaultText;
+                                if (final.includes(emoji)) return final;
+                                if (/[\u{1F300}-\u{1F9FF}]/u.test(final)) return final;
+                                return `${emoji} ${final}`;
+                            };
+
+                            const pendingTag = formatTag(updatedMerchant.pendingConfirmTag, "Pending Confirmation", "🕒");
+
+                            // Tags to remove (both old defaults and potentially current config)
+                            const tagsToRemove = [
+                                updatedMerchant.orderConfirmTag,
+                                updatedMerchant.orderCancelTag,
+                                "Order Confirmed",
+                                "Order Cancelled",
+                                "Order Cancel By customer",
+                                "✅ Order Confirmed",
+                                "❌ Order Cancelled"
+                            ].filter(t => t && t !== pendingTag);
+
                             const tagResult = await shopifyService.addOrderTag(
                                 shopDomain,
                                 updatedMerchant.shopifyAccessToken,
                                 orderId,
-                                updatedMerchant.pendingConfirmTag || "Pending Order Confirmation",
-                                [updatedMerchant.orderConfirmTag, updatedMerchant.orderCancelTag]
+                                pendingTag,
+                                tagsToRemove
                             );
                             console.log(`[ShopifyWebhook] Tagging result for order ${orderId}:`, tagResult);
                         } else {

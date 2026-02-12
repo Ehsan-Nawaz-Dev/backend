@@ -492,17 +492,37 @@ class WhatsAppService {
 
                         // Process intent from known selected option text in given context
                         const processSelectedOption = (selectedText, isPreCancelCtx) => {
+                            const getTagWithEmoji = (tag, defaultTag, emoji) => {
+                                const finalTag = tag || defaultTag;
+                                if (finalTag.includes(emoji)) return finalTag;
+                                // Simple heuristic: if it contains an emoji, leave it alone. If plain text, add emoji.
+                                if (/[\u{1F300}-\u{1F9FF}]/u.test(finalTag)) return finalTag;
+                                return `${emoji} ${finalTag}`;
+                            };
+
                             if (isPreCancelCtx) {
                                 if (selectedText.toLowerCase().includes("no") || selectedText.includes("✅") || selectedText.toLowerCase().includes("keep")) {
-                                    return { status: "confirmed", tag: merchant.orderConfirmTag || "Order Confirmed" };
+                                    return {
+                                        status: "confirmed",
+                                        tag: getTagWithEmoji(merchant.orderConfirmTag, "Order Confirmed", "✅")
+                                    };
                                 } else {
-                                    return { status: "cancelled", tag: merchant.orderCancelTag || "Order Cancelled" };
+                                    return {
+                                        status: "cancelled",
+                                        tag: getTagWithEmoji(merchant.orderCancelTag, "Order Cancelled", "❌")
+                                    };
                                 }
                             } else {
                                 if (isConfirmOption(selectedText)) {
-                                    return { status: "confirmed", tag: merchant.orderConfirmTag || "Order Confirmed" };
+                                    return {
+                                        status: "confirmed",
+                                        tag: getTagWithEmoji(merchant.orderConfirmTag, "Order Confirmed", "✅")
+                                    };
                                 } else if (isCancelOption(selectedText)) {
-                                    return { status: "cancelled", tag: merchant.orderCancelTag || "Order Cancelled" };
+                                    return {
+                                        status: "cancelled",
+                                        tag: getTagWithEmoji(merchant.orderCancelTag, "Order Cancelled", "❌")
+                                    };
                                 }
                             }
                             return null;
@@ -781,9 +801,41 @@ class WhatsAppService {
 
                             // B. FINAL PROCESSING (Confirmation or Verified Cancellation)
                             const isConfirm = activityStatus === "confirmed";
-                            const tagsToRemove = isConfirm
-                                ? [merchant.pendingConfirmTag, merchant.orderCancelTag]
-                                : [merchant.pendingConfirmTag, merchant.orderConfirmTag];
+
+                            // Robust tag removal: Handle plain tags, emoji tags, and legacy defaults
+                            const getTagVariants = (tag, emoji) => {
+                                if (!tag) return [];
+                                const variants = [tag]; // Raw from DB
+                                if (emoji && !tag.includes(emoji)) {
+                                    variants.push(`${emoji} ${tag}`); // With emoji
+                                }
+                                return variants;
+                            };
+
+                            const pendingTags = [
+                                ...getTagVariants(merchant.pendingConfirmTag, "🕒"),
+                                "Pending Confirmation",
+                                "Pending Order Confirmation"
+                            ];
+
+                            const cancelTags = [
+                                ...getTagVariants(merchant.orderCancelTag, "❌"),
+                                "Order Cancelled",
+                                "Order Cancel By customer"
+                            ];
+
+                            const confirmTags = [
+                                ...getTagVariants(merchant.orderConfirmTag, "✅"),
+                                "Order Confirmed"
+                            ];
+
+                            const uniqueTagsToRemove = [...new Set(
+                                isConfirm
+                                    ? [...pendingTags, ...cancelTags]
+                                    : [...pendingTags, ...confirmTags]
+                            )];
+
+                            const tagsToRemove = uniqueTagsToRemove;
 
                             // 1. Attempt Shopify Tagging (Background)
                             try {

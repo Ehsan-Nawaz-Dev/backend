@@ -56,7 +56,6 @@ class ShopifyService {
 
             console.log(`[ShopifyService] Current tags: "${currentTags}"`);
 
-            // 2. Define tags to remove (defaults + extra merchant-specific tags)
             const defaultStatusTags = [
                 "Pending Order Confirmation",
                 "Order Confirmed",
@@ -65,7 +64,10 @@ class ShopifyService {
                 "Pending Confirmation",
                 "Confirmed",
                 "Cancelled",
-                "Order Cancel By customer"
+                "Order Cancel By customer",
+                "✅ Order Confirmed",
+                "❌ Order Cancelled",
+                "🕒 Pending Confirmation"
             ];
 
             const tagsToRemove = [...new Set([...defaultStatusTags, ...extraTagsToRemove.filter(t => t)])];

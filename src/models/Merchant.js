@@ -20,9 +20,9 @@ const MerchantSchema = new mongoose.Schema(
     whatsappProvider: { type: String, enum: ["twilio", "cloud", "device"], default: "device" },
 
     // Tag Settings
-    pendingConfirmTag: { type: String, default: 'Pending Confirmation' },
-    orderConfirmTag: { type: String, default: 'Order Confirmed' },
-    orderCancelTag: { type: String, default: 'Order Cancel By customer' },
+    pendingConfirmTag: { type: String, default: '🕒 Pending Confirmation' },
+    orderConfirmTag: { type: String, default: '✅ Order Confirmed' },
+    orderCancelTag: { type: String, default: '❌ Order Cancelled' },
 
     // Reply Messages
     orderConfirmReply: { type: String, default: 'Thank you! Your order has been confirmed. ✅' },

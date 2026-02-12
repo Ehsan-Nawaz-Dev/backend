@@ -31,12 +31,19 @@ router.post("/", async (req, res) => {
           selectedOption.toLowerCase().includes("no") ||
           selectedOption.includes("❌");
 
+        const getTagWithEmoji = (tag, defaultTag, emoji) => {
+          const finalTag = tag || defaultTag;
+          if (finalTag.includes(emoji)) return finalTag;
+          if (/[\u{1F300}-\u{1F9FF}]/u.test(finalTag)) return finalTag;
+          return `${emoji} ${finalTag}`;
+        };
+
         if (isConfirm) {
           replyText = merchant.orderConfirmReply || "Your order is confirmed, thank you! ✅";
-          tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+          tagToAdd = getTagWithEmoji(merchant.orderConfirmTag, "Order Confirmed", "✅");
         } else if (isCancel) {
           replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
-          tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+          tagToAdd = getTagWithEmoji(merchant.orderCancelTag, "Order Cancelled", "❌");
         }
 
         if (tagToAdd) {
@@ -48,9 +55,31 @@ router.post("/", async (req, res) => {
           }).sort({ createdAt: -1 });
 
           if (log && log.orderId) {
-            const tagsToRemove = isConfirm
-              ? [merchant.pendingConfirmTag, merchant.orderCancelTag]
-              : [merchant.pendingConfirmTag, merchant.orderConfirmTag];
+            // Robust tag removal logic matching whatsappService.js
+            const getTagVariants = (tag, emoji) => {
+              if (!tag) return [];
+              const variants = [tag];
+              if (emoji && !tag.includes(emoji)) variants.push(`${emoji} ${tag}`);
+              return variants;
+            };
+
+            const pendingTags = [
+              ...getTagVariants(merchant.pendingConfirmTag, "🕒"),
+              "Pending Confirmation", "Pending Order Confirmation"
+            ];
+            const cancelTags = [
+              ...getTagVariants(merchant.orderCancelTag, "❌"),
+              "Order Cancelled", "Order Cancel By customer"
+            ];
+            const confirmTags = [
+              ...getTagVariants(merchant.orderConfirmTag, "✅"),
+              "Order Confirmed"
+            ];
+
+            const tagsToRemove = [...new Set(isConfirm
+              ? [...pendingTags, ...cancelTags]
+              : [...pendingTags, ...confirmTags]
+            )];
 
             await shopifyService.addOrderTag(shop, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
 
