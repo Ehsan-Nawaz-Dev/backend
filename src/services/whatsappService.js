@@ -4,7 +4,8 @@ import makeWASocket, {
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
     Browsers,
-    getAggregateVotesInPollMessage
+    getAggregateVotesInPollMessage,
+    decryptPollVote
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { WhatsAppSession } from "../models/WhatsAppSession.js";
@@ -512,34 +513,63 @@ class WhatsAppService {
                             const pollCreationKey = pollUpdate?.pollCreationMessageKey;
                             const isPreCancelContext = log?.type === "pre-cancel";
 
-                            // ===== METHOD A: Baileys Decryption (most reliable) =====
+                            // ===== METHOD A: Baileys Decryption (Robust Manual Approach) =====
                             try {
                                 const sock = this.sockets.get(shopDomain);
                                 if (sock && pollCreationKey) {
-                                    const pollCreationMsg = await this.getMessageFromStore(shopDomain, pollCreationKey);
+                                    // Fetch FULL WAMessage wrapper from store
+                                    const pollCreationWrapper = await this.getMessageFromStore(shopDomain, pollCreationKey);
 
-                                    if (pollCreationMsg) {
-                                        console.log(`[Interaction] Found original poll message in store, attempting Baileys decryption...`);
+                                    if (pollCreationWrapper) {
+                                        console.log(`[Interaction] Found original poll message in store (key: ${pollCreationKey.id})`);
 
-                                        const pollVotes = getAggregateVotesInPollMessage({
-                                            message: pollCreationMsg,
-                                            pollUpdates: [pollUpdate],
-                                        });
+                                        const pollMsgContent = pollCreationWrapper.message;
 
-                                        console.log(`[Interaction] Decrypted poll votes:`, JSON.stringify(pollVotes));
+                                        if (!pollMsgContent) {
+                                            console.warn(`[Interaction] Poll message wrapper exists but .message is missing!`);
+                                        } else {
+                                            // Determine creator JID
+                                            const pollCreatorJid = pollCreationWrapper.key?.fromMe
+                                                ? (sock.user?.id?.split(':')[0]?.split('@')[0] || pollCreationWrapper.key?.participant)
+                                                : (pollCreationWrapper.key?.participant || pollCreationWrapper.key?.remoteJid);
 
-                                        if (pollVotes && pollVotes.length > 0) {
-                                            const votedOptions = pollVotes.filter(v => v.voters && v.voters.length > 0);
+                                            console.log(`[Interaction] Attempting manual decryptPollVote with creator: ${pollCreatorJid}`);
 
-                                            if (votedOptions.length > 0) {
-                                                const selectedOption = votedOptions[0].name;
-                                                console.log(`[Interaction] Baileys decrypted selected option: "${selectedOption}"`);
+                                            // Manual decrypt
+                                            const pollVote = decryptPollVote({
+                                                vote: pollUpdate.vote,
+                                                pollCreatorJid: pollCreatorJid,
+                                                pollMsgId: pollCreationKey.id,
+                                                pollMsg: pollMsgContent,
+                                                voterJid: msg.key.remoteJid,
+                                            });
 
-                                                const result = processSelectedOption(selectedOption, isPreCancelContext);
-                                                if (result) {
-                                                    activityStatus = result.status;
-                                                    tagToAdd = result.tag;
-                                                    console.log(`[Interaction] Baileys decryption SUCCESS: ${activityStatus}`);
+                                            if (pollVote && pollVote.selectedOptions) {
+                                                console.log(`[Interaction] Detailed Decrypted Vote:`, JSON.stringify(pollVote));
+
+                                                // Get original options
+                                                const originalOptions = (pollMsgContent.pollCreationMessage || pollMsgContent.pollCreationMessageV3)?.options || [];
+                                                const getOptionText = (opt) => opt.optionName || opt;
+
+                                                const selectedHashes = pollVote.selectedOptions.map(h => Buffer.from(h).toString('hex').toUpperCase());
+
+                                                if (selectedHashes.length > 0) {
+                                                    for (const optObj of originalOptions) {
+                                                        const optText = getOptionText(optObj);
+                                                        const optHash = crypto.createHash('sha256').update(optText, 'utf8').digest('hex').toUpperCase();
+
+                                                        if (selectedHashes.includes(optHash)) {
+                                                            console.log(`[Interaction] ✅ Manual Decrypt Match: "${optText}"`);
+                                                            const result = processSelectedOption(optText, isPreCancelContext);
+                                                            if (result) {
+                                                                activityStatus = result.status;
+                                                                tagToAdd = result.tag;
+                                                                console.log(`[Interaction] Manual decryption SUCCESS: ${activityStatus}`);
+                                                                // Break because we found the match
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -548,7 +578,7 @@ class WhatsAppService {
                                     }
                                 }
                             } catch (decryptErr) {
-                                console.warn(`[Interaction] Baileys decryption failed:`, decryptErr.message);
+                                console.warn(`[Interaction] Manual decryption failed:`, decryptErr.message);
                             }
 
                             // ===== METHOD B: SHA-256 Hash Matching (fallback) =====
