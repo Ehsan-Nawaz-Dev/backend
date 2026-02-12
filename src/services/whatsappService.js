@@ -548,22 +548,44 @@ class WhatsAppService {
                                             // Candidate JIDs for Creator (Me) and Voter
                                             // WhatsApp uses both PN (Phone Number) and LID (Lookup ID).
                                             // Encryption might use either, causing AAD mismatch if we guess wrong.
-                                            const creatorCandidates = [
+
+                                            // Helper to generate variants: Raw, Normalized (no device), and Agent 0
+                                            const generateJidVariants = (jid) => {
+                                                if (!jid) return [];
+                                                const variants = [jid];
+                                                const normalized = jidNormalizedUser(jid); // Strips device
+                                                if (normalized !== jid) variants.push(normalized);
+
+                                                // If LID, maybe it needs explicit :0 device? 
+                                                // Or if it has :0, maybe it needs to be stripped? 
+                                                // We just try both normalized and raw.
+                                                return variants;
+                                            };
+
+                                            const rawCreatorCandidates = [
                                                 getKeyAuthor(pollCreationWrapper.key, meId), // Canonical
-                                                sock.authState?.creds?.me?.lid,             // My LID
+                                                sock.authState?.creds?.me?.lid,             // My LID (often has device)
+                                                pollCreationWrapper.key.remoteJid,           // Remote Jid (might be me if self-chat)
+                                                pollCreationWrapper.key.participant          // Participant (in group)
                                             ].filter(Boolean);
 
-                                            const voterCandidates = [
+                                            const rawVoterCandidates = [
                                                 getKeyAuthor(msg.key, meId),       // Canonical (often PN)
                                                 msg.key.remoteJid,                 // Raw remote (often LID)
                                                 msg.key.participant,               // Raw participant
                                             ].filter(Boolean);
 
-                                            // Deduplicate candidates
-                                            const uniqueCreators = [...new Set(creatorCandidates)];
-                                            const uniqueVoters = [...new Set(voterCandidates)];
+                                            // Flatten and deduplicate
+                                            let uniqueCreators = [...new Set(rawCreatorCandidates.flatMap(generateJidVariants))];
+                                            let uniqueVoters = [...new Set(rawVoterCandidates.flatMap(generateJidVariants))];
 
-                                            console.log(`[Interaction] Decrypt candidates - Creators: ${uniqueCreators.join(', ')} | Voters: ${uniqueVoters.join(', ')}`);
+                                            // Ensure we don't have empty strings
+                                            uniqueCreators = uniqueCreators.filter(j => j && j.includes('@'));
+                                            uniqueVoters = uniqueVoters.filter(j => j && j.includes('@'));
+
+                                            console.log(`[Interaction] Decrypt candidates (Exhaustive):`);
+                                            console.log(`[Interaction]   Creators: ${uniqueCreators.join(', ')}`);
+                                            console.log(`[Interaction]   Voters:   ${uniqueVoters.join(', ')}`);
 
                                             let pollVote = null;
                                             let decryptionSuccess = false;
