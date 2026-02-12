@@ -3,7 +3,8 @@ import makeWASocket, {
     DisconnectReason,
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
-    Browsers
+    Browsers,
+    getAggregateVotesInPollMessage
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { WhatsAppSession } from "../models/WhatsAppSession.js";
@@ -21,6 +22,31 @@ class WhatsAppService {
         this.sockets = new Map(); // shopDomain -> socket instance
         this.io = null; // Socket.io instance
         this.sessionMessageCounts = new Map(); // shopDomain -> message count in session
+        this.messageStores = new Map(); // shopDomain -> Map of msgId -> message (for poll decryption)
+    }
+
+    // Store a message in the in-memory store (for poll vote decryption)
+    storeMessage(shopDomain, msg) {
+        if (!this.messageStores.has(shopDomain)) {
+            this.messageStores.set(shopDomain, new Map());
+        }
+        const store = this.messageStores.get(shopDomain);
+        store.set(msg.key.id, msg);
+        // Limit store size to prevent memory leaks (keep last 500 messages)
+        if (store.size > 500) {
+            const firstKey = store.keys().next().value;
+            store.delete(firstKey);
+        }
+    }
+
+    // Get a stored message by key (used by Baileys for poll decryption)
+    getMessageFromStore(shopDomain, key) {
+        const store = this.messageStores.get(shopDomain);
+        if (store && key?.id) {
+            const msg = store.get(key.id);
+            return msg?.message || undefined;
+        }
+        return undefined;
     }
 
     // Helper for sleep/delay
@@ -233,6 +259,10 @@ class WhatsAppService {
                 },
                 logger,
                 browser: ["Whatomatic Backend", "Chrome", "1.1.0"],
+                getMessage: async (key) => {
+                    // Required by Baileys for poll vote decryption
+                    return this.getMessageFromStore(shopDomain, key);
+                },
             });
 
             this.sockets.set(shopDomain, sock);
@@ -336,7 +366,13 @@ class WhatsAppService {
                 if (m.type !== "notify") return;
 
                 for (const msg of m.messages) {
-                    if (!msg.message || msg.key.fromMe) continue;
+                    if (!msg.message) continue;
+
+                    // Store ALL messages (including fromMe polls) for poll vote decryption
+                    this.storeMessage(shopDomain, msg);
+
+                    // Skip processing our own outgoing messages
+                    if (msg.key.fromMe) continue;
 
                     // Refined source extraction: handle device IDs like 1234567:1@s.whatsapp.net
                     const fullJid = msg.key.remoteJid;
@@ -395,101 +431,120 @@ class WhatsAppService {
                         let activityStatus = null;
                         let tagToAdd = null;
 
+                        // Helper: Determine intent from option text
+                        const isConfirmOption = (optionText) => {
+                            const lower = optionText.toLowerCase();
+                            return lower.includes("confirm") || lower.includes("yes") || optionText.includes("✅");
+                        };
+                        const isCancelOption = (optionText) => {
+                            const lower = optionText.toLowerCase();
+                            return lower.includes("cancel") || lower.includes("no") || optionText.includes("❌");
+                        };
+
+                        // Process intent from known selected option text in given context
+                        const processSelectedOption = (selectedText, isPreCancelCtx) => {
+                            if (isPreCancelCtx) {
+                                if (selectedText.toLowerCase().includes("no") || selectedText.includes("✅") || selectedText.toLowerCase().includes("keep")) {
+                                    return { status: "confirmed", tag: merchant.orderConfirmTag || "Order Confirmed" };
+                                } else {
+                                    return { status: "cancelled", tag: merchant.orderCancelTag || "Order Cancelled" };
+                                }
+                            } else {
+                                if (isConfirmOption(selectedText)) {
+                                    return { status: "confirmed", tag: merchant.orderConfirmTag || "Order Confirmed" };
+                                } else if (isCancelOption(selectedText)) {
+                                    return { status: "cancelled", tag: merchant.orderCancelTag || "Order Cancelled" };
+                                }
+                            }
+                            return null;
+                        };
+
                         // 1. Detect Intent (Poll or Text)
                         if (isPollUpdate) {
                             console.log(`[Interaction] Processing poll update from ${fromRaw}`);
                             const pollUpdate = msg.message.pollUpdateMessage;
-                            const vote = pollUpdate?.vote;
-                            const selectedHashes = vote?.selectedOptions || [];
-                            const firstHash = selectedHashes[0] ? Buffer.from(selectedHashes[0]).toString('hex').toUpperCase() : null;
+                            const pollCreationKey = pollUpdate?.pollCreationMessageKey;
+                            const isPreCancelContext = log?.type === "pre-cancel";
 
-                            if (firstHash) {
-                                // A. Check based on current context (Log Type)
-                                if (log.type === "pre-cancel") {
-                                    // We are in the verification step. Check against verification template.
-                                    const verifyTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/cancel_verify" });
-                                    const verifyOptions = verifyTemplate?.pollOptions || ["🗑️ Yes, Cancel Order", "✅ No, Keep Order"];
+                            // ===== METHOD A: Baileys Decryption (most reliable) =====
+                            try {
+                                const sock = this.sockets.get(shopDomain);
+                                if (sock && pollCreationKey) {
+                                    const pollCreationMsg = this.getMessageFromStore(shopDomain, pollCreationKey);
 
-                                    for (const option of verifyOptions) {
-                                        const hash = crypto.createHash('sha256').update(option).digest('hex').toUpperCase();
-                                        if (firstHash === hash) {
-                                            console.log(`[Interaction] Match Verify Option: ${option}`);
-                                            // LOGIC: "Yes" to "Are you sure you want to cancel?" = Cancelled
-                                            // "No" to "Are you sure you want to cancel?" = Confirmed
-                                            if (option.toLowerCase().includes("no") || option.includes("✅")) {
-                                                activityStatus = "confirmed";
-                                                tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
-                                            } else {
-                                                activityStatus = "cancelled";
-                                                tagToAdd = merchant.orderCancelTag || "Order Cancelled";
+                                    if (pollCreationMsg) {
+                                        console.log(`[Interaction] Found original poll message in store, attempting Baileys decryption...`);
+
+                                        const pollVotes = getAggregateVotesInPollMessage({
+                                            message: pollCreationMsg,
+                                            pollUpdates: [pollUpdate],
+                                        });
+
+                                        console.log(`[Interaction] Decrypted poll votes:`, JSON.stringify(pollVotes));
+
+                                        if (pollVotes && pollVotes.length > 0) {
+                                            const votedOptions = pollVotes.filter(v => v.voters && v.voters.length > 0);
+
+                                            if (votedOptions.length > 0) {
+                                                const selectedOption = votedOptions[0].name;
+                                                console.log(`[Interaction] Baileys decrypted selected option: "${selectedOption}"`);
+
+                                                const result = processSelectedOption(selectedOption, isPreCancelContext);
+                                                if (result) {
+                                                    activityStatus = result.status;
+                                                    tagToAdd = result.tag;
+                                                    console.log(`[Interaction] Baileys decryption SUCCESS: ${activityStatus}`);
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        console.warn(`[Interaction] Original poll message NOT found in store (key: ${pollCreationKey?.id})`);
+                                    }
+                                }
+                            } catch (decryptErr) {
+                                console.warn(`[Interaction] Baileys decryption failed:`, decryptErr.message);
+                            }
+
+                            // ===== METHOD B: SHA-256 Hash Matching (fallback) =====
+                            if (!activityStatus) {
+                                console.log(`[Interaction] Trying SHA-256 hash matching...`);
+                                const vote = pollUpdate?.vote;
+                                const selectedHashes = vote?.selectedOptions || [];
+                                const firstHash = selectedHashes[0] ? Buffer.from(selectedHashes[0]).toString('hex').toUpperCase() : null;
+
+                                if (firstHash) {
+                                    console.log(`[Interaction] Vote hash: ${firstHash}`);
+
+                                    const templateEvent = isPreCancelContext ? "orders/cancel_verify" : "orders/create";
+                                    const template = await Template.findOne({ merchant: merchant._id, event: templateEvent });
+                                    const options = isPreCancelContext
+                                        ? (template?.pollOptions || ["🗑️ Yes, Cancel Order", "✅ No, Keep Order"])
+                                        : (template?.isPoll ? template.pollOptions : ["✅ Yes, Confirm", "❌ No, Cancel"]);
+
+                                    for (const option of options) {
+                                        const hashMethods = [
+                                            crypto.createHash('sha256').update(option, 'utf8').digest('hex').toUpperCase(),
+                                            crypto.createHash('sha256').update(Buffer.from(option, 'utf16le')).digest('hex').toUpperCase(),
+                                            crypto.createHash('sha256').update(option, 'binary').digest('hex').toUpperCase(),
+                                        ];
+                                        console.log(`[Interaction] Option "${option}" hash: ${hashMethods[0].substring(0, 16)}...`);
+
+                                        if (hashMethods.includes(firstHash)) {
+                                            console.log(`[Interaction] Hash match found for: "${option}"`);
+                                            const result = processSelectedOption(option, isPreCancelContext);
+                                            if (result) {
+                                                activityStatus = result.status;
+                                                tagToAdd = result.tag;
                                             }
                                             break;
                                         }
                                     }
-                                } else {
-                                    // Standard Confirmation Poll
-                                    const confirmTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/create" });
-                                    if (confirmTemplate && confirmTemplate.isPoll) {
-                                        for (const option of confirmTemplate.pollOptions) {
-                                            const hash = crypto.createHash('sha256').update(option).digest('hex').toUpperCase();
-                                            console.log(`[Interaction] Comparing hash for option "${option}": ${hash} vs ${firstHash}`);
-                                            if (firstHash === hash) {
-                                                console.log(`[Interaction] Match Confirm Option: ${option}`);
-                                                if (option.toLowerCase().includes("confirm") || option.toLowerCase().includes("yes") || option.includes("✅")) {
-                                                    activityStatus = "confirmed";
-                                                    tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
-                                                } else if (option.toLowerCase().includes("cancel") || option.toLowerCase().includes("no") || option.includes("❌")) {
-                                                    activityStatus = "cancelled";
-                                                    tagToAdd = merchant.orderCancelTag || "Order Cancelled";
-                                                }
-                                                break;
-                                            }
-                                        }
-                                    }
                                 }
                             }
 
-                            // B. Fallback: If hash didn't match, try to infer from poll index
-                            if (!activityStatus && msg.message?.pollUpdateMessage) {
-                                console.warn(`[Interaction] Hash mismatch! Attempting fallback detection...`);
-                                const confirmTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/create" });
-
-                                // Try to use vote index (0 = first option, 1 = second option, etc.)
-                                // Most merchants put "Confirm" first and "Cancel" second
-                                if (confirmTemplate?.pollOptions?.length >= 2) {
-                                    // Analyze which option is more likely to be Cancel based on text
-                                    const option1 = confirmTemplate.pollOptions[0].toLowerCase();
-                                    const option2 = confirmTemplate.pollOptions[1].toLowerCase();
-
-                                    const option1IsCancel = option1.includes("cancel") || option1.includes("no");
-                                    const option2IsCancel = option2.includes("cancel") || option2.includes("no");
-
-                                    console.log(`[Interaction] Poll options analysis: Option1="${confirmTemplate.pollOptions[0]}" (isCancel: ${option1IsCancel}), Option2="${confirmTemplate.pollOptions[1]}" (isCancel: ${option2IsCancel})`);
-
-                                    // If we can determine which is cancel, use that
-                                    if (option1IsCancel && !option2IsCancel) {
-                                        console.log(`[Interaction] FALLBACK: Assuming Option 1 hash = Cancel`);
-                                        activityStatus = "cancelled";
-                                        tagToAdd = merchant.orderCancelTag || "Order Cancelled";
-                                    } else if (option2IsCancel && !option1IsCancel) {
-                                        console.log(`[Interaction] FALLBACK: Assuming Option 2 hash = Cancel`);
-                                        activityStatus = "cancelled";
-                                        tagToAdd = merchant.orderCancelTag || "Order Cancelled";
-                                    } else {
-                                        console.warn(`[Interaction] FALLBACK FAILED: Cannot determine which option is cancel. Defaulting to confirmed.`);
-                                        activityStatus = "confirmed";
-                                        tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
-                                    }
-                                } else {
-                                    console.warn(`[Interaction] No poll options found for fallback. Defaulting to confirmed.`);
-                                    activityStatus = "confirmed";
-                                    tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
-                                }
-                            }
-
-                            // C. Ultimate Fallback: default to confirmed for safety
+                            // ===== METHOD C: Safe Default =====
                             if (!activityStatus) {
-                                console.warn(`[Interaction] All detection methods failed. Defaulting to confirmed.`);
+                                console.warn(`[Interaction] All poll detection methods failed! Defaulting to confirmed (safe).`);
                                 activityStatus = "confirmed";
                                 tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
                             }
@@ -900,14 +955,20 @@ class WhatsAppService {
 
             console.log(`[WhatsApp] Sending poll to ${formattedNumber}@s.whatsapp.net with options:`, pollOptions);
 
-            await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, {
+            const sentMsg = await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, {
                 poll: {
                     name: pollName,
                     values: pollOptions,
                     selectableCount: 1
                 }
             });
+            // Store the sent poll message so we can decrypt vote responses later
+            if (sentMsg) {
+                this.storeMessage(shopDomain, sentMsg);
+                console.log(`[WhatsApp] Poll sent and stored (key: ${sentMsg.key?.id}) for vote decryption`);
+            }
             console.log(`[WhatsApp] Poll sent successfully to ${formattedNumber}`);
+
             return { success: true };
         } catch (error) {
             console.error(`[WhatsApp] Error sending poll:`, error);
