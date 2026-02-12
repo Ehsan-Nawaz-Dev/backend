@@ -542,26 +542,77 @@ class WhatsAppService {
                                         } else {
                                             // Use Baileys' getKeyAuthor for correct JID resolution
                                             const meId = jidNormalizedUser(sock.user?.id);
-                                            const pollCreatorJid = getKeyAuthor(pollCreationWrapper.key, meId);
-                                            const voterJid = getKeyAuthor(msg.key, meId);
+                                            // const pollCreatorJid = getKeyAuthor(pollCreationWrapper.key, meId);
+                                            // const voterJid = getKeyAuthor(msg.key, meId);
 
-                                            console.log(`[Interaction] Attempting decryptPollVote:`);
-                                            console.log(`[Interaction]   pollCreatorJid: ${pollCreatorJid}`);
-                                            console.log(`[Interaction]   voterJid: ${voterJid}`);
-                                            console.log(`[Interaction]   pollMsgId: ${pollCreationKey.id}`);
-                                            console.log(`[Interaction]   pollEncKey length: ${pollEncKey?.length}`);
+                                            // Candidate JIDs for Creator (Me) and Voter
+                                            // WhatsApp uses both PN (Phone Number) and LID (Lookup ID).
+                                            // Encryption might use either, causing AAD mismatch if we guess wrong.
+                                            const creatorCandidates = [
+                                                getKeyAuthor(pollCreationWrapper.key, meId), // Canonical
+                                                sock.authState?.creds?.me?.lid,             // My LID
+                                            ].filter(Boolean);
 
-                                            // Correct 2-argument call matching Baileys signature:
-                                            // decryptPollVote({ encPayload, encIv }, { pollCreatorJid, pollMsgId, pollEncKey, voterJid })
-                                            const pollVote = decryptPollVote(
-                                                pollUpdate.vote,  // { encPayload, encIv }
-                                                {
-                                                    pollCreatorJid,
-                                                    pollMsgId: pollCreationKey.id,
-                                                    pollEncKey,
-                                                    voterJid,
+                                            const voterCandidates = [
+                                                getKeyAuthor(msg.key, meId),       // Canonical (often PN)
+                                                msg.key.remoteJid,                 // Raw remote (often LID)
+                                                msg.key.participant,               // Raw participant
+                                            ].filter(Boolean);
+
+                                            // Deduplicate candidates
+                                            const uniqueCreators = [...new Set(creatorCandidates)];
+                                            const uniqueVoters = [...new Set(voterCandidates)];
+
+                                            console.log(`[Interaction] Decrypt candidates - Creators: ${uniqueCreators.join(', ')} | Voters: ${uniqueVoters.join(', ')}`);
+
+                                            let pollVote = null;
+                                            let decryptionSuccess = false;
+
+                                            // Brute-force retry loop
+                                            outerLoop:
+                                            for (const creatorJid of uniqueCreators) {
+                                                for (const voterJid of uniqueVoters) {
+                                                    try {
+                                                        // console.log(`[Interaction] Trying decrypt with Creator: ${creatorJid} | Voter: ${voterJid}`);
+                                                        pollVote = decryptPollVote(
+                                                            pollUpdate.vote,
+                                                            {
+                                                                pollCreatorJid: creatorJid,
+                                                                pollMsgId: pollCreationKey.id,
+                                                                pollEncKey,
+                                                                voterJid: voterJid,
+                                                            }
+                                                        );
+                                                        if (pollVote) {
+                                                            console.log(`[Interaction] ✅ Decryption passed with Creator: ${creatorJid} | Voter: ${voterJid}`);
+                                                            decryptionSuccess = true;
+                                                            break outerLoop;
+                                                        }
+                                                    } catch (e) {
+                                                        // Ignore specific failures and continue trying
+                                                    }
                                                 }
-                                            );
+                                            }
+
+                                            if (!decryptionSuccess) {
+                                                console.warn(`[Interaction] Decryption failed with all JID combinations.`);
+                                                // Log the error from the primary candidate pair for context
+                                                try {
+                                                    const primaryCreator = uniqueCreators[0];
+                                                    const primaryVoter = uniqueVoters[0];
+                                                    decryptPollVote(
+                                                        pollUpdate.vote,
+                                                        {
+                                                            pollCreatorJid: primaryCreator,
+                                                            pollMsgId: pollCreationKey.id,
+                                                            pollEncKey,
+                                                            voterJid: primaryVoter
+                                                        }
+                                                    );
+                                                } catch (finalErr) {
+                                                    console.warn(`[Interaction] Primary decryption error: ${finalErr.message}`);
+                                                }
+                                            }
 
                                             if (pollVote && pollVote.selectedOptions) {
                                                 console.log(`[Interaction] Decrypted vote selectedOptions count: ${pollVote.selectedOptions.length}`);
@@ -572,7 +623,7 @@ class WhatsAppService {
 
                                                 // selectedOptions from decryptPollVote are SHA256 hashes of the option text
                                                 const selectedHashes = pollVote.selectedOptions.map(h => Buffer.from(h).toString('hex').toUpperCase());
-                                                console.log(`[Interaction] Decrypted vote hashes: ${selectedHashes.map(h => h.substring(0, 16) + '...').join(', ')}`);
+                                                // console.log(`[Interaction] Decrypted vote hashes: ${selectedHashes.map(h => h.substring(0, 16) + '...').join(', ')}`);
 
                                                 if (selectedHashes.length > 0) {
                                                     for (const optObj of originalOptions) {
@@ -591,6 +642,8 @@ class WhatsAppService {
                                                         }
                                                     }
                                                 }
+                                            } else if (!decryptionSuccess) {
+                                                // Don't log "returned no selectedOptions" if we already knew it failed
                                             } else {
                                                 console.warn(`[Interaction] decryptPollVote returned no selectedOptions`);
                                             }
