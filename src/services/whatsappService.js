@@ -5,7 +5,9 @@ import makeWASocket, {
     makeCacheableSignalKeyStore,
     Browsers,
     getAggregateVotesInPollMessage,
-    decryptPollVote
+    decryptPollVote,
+    getKeyAuthor,
+    jidNormalizedUser
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { WhatsAppSession } from "../models/WhatsAppSession.js";
@@ -513,7 +515,7 @@ class WhatsAppService {
                             const pollCreationKey = pollUpdate?.pollCreationMessageKey;
                             const isPreCancelContext = log?.type === "pre-cancel";
 
-                            // ===== METHOD A: Baileys Decryption (Robust Manual Approach) =====
+                            // ===== METHOD A: Baileys Decryption (Correct 2-arg API) =====
                             try {
                                 const sock = this.sockets.get(shopDomain);
                                 if (sock && pollCreationKey) {
@@ -524,34 +526,53 @@ class WhatsAppService {
                                         console.log(`[Interaction] Found original poll message in store (key: ${pollCreationKey.id})`);
 
                                         const pollMsgContent = pollCreationWrapper.message;
+                                        // The encryption key is stored in messageContextInfo.messageSecret
+                                        const pollEncKey = pollCreationWrapper.messageContextInfo?.messageSecret
+                                            || pollMsgContent?.messageContextInfo?.messageSecret;
 
                                         if (!pollMsgContent) {
                                             console.warn(`[Interaction] Poll message wrapper exists but .message is missing!`);
+                                        } else if (!pollEncKey) {
+                                            console.warn(`[Interaction] Poll message found but messageSecret (pollEncKey) is missing! Cannot decrypt.`);
+                                            console.log(`[Interaction] Wrapper keys: ${Object.keys(pollCreationWrapper).join(', ')}`);
+                                            console.log(`[Interaction] Message keys: ${Object.keys(pollMsgContent).join(', ')}`);
+                                            if (pollMsgContent.messageContextInfo) {
+                                                console.log(`[Interaction] messageContextInfo keys: ${Object.keys(pollMsgContent.messageContextInfo).join(', ')}`);
+                                            }
                                         } else {
-                                            // Determine creator JID
-                                            const pollCreatorJid = pollCreationWrapper.key?.fromMe
-                                                ? (sock.user?.id?.split(':')[0]?.split('@')[0] || pollCreationWrapper.key?.participant)
-                                                : (pollCreationWrapper.key?.participant || pollCreationWrapper.key?.remoteJid);
+                                            // Use Baileys' getKeyAuthor for correct JID resolution
+                                            const meId = jidNormalizedUser(sock.user?.id);
+                                            const pollCreatorJid = getKeyAuthor(pollCreationWrapper.key, meId);
+                                            const voterJid = getKeyAuthor(msg.key, meId);
 
-                                            console.log(`[Interaction] Attempting manual decryptPollVote with creator: ${pollCreatorJid}`);
+                                            console.log(`[Interaction] Attempting decryptPollVote:`);
+                                            console.log(`[Interaction]   pollCreatorJid: ${pollCreatorJid}`);
+                                            console.log(`[Interaction]   voterJid: ${voterJid}`);
+                                            console.log(`[Interaction]   pollMsgId: ${pollCreationKey.id}`);
+                                            console.log(`[Interaction]   pollEncKey length: ${pollEncKey?.length}`);
 
-                                            // Manual decrypt
-                                            const pollVote = decryptPollVote({
-                                                vote: pollUpdate.vote,
-                                                pollCreatorJid: pollCreatorJid,
-                                                pollMsgId: pollCreationKey.id,
-                                                pollMsg: pollMsgContent,
-                                                voterJid: msg.key.remoteJid,
-                                            });
+                                            // Correct 2-argument call matching Baileys signature:
+                                            // decryptPollVote({ encPayload, encIv }, { pollCreatorJid, pollMsgId, pollEncKey, voterJid })
+                                            const pollVote = decryptPollVote(
+                                                pollUpdate.vote,  // { encPayload, encIv }
+                                                {
+                                                    pollCreatorJid,
+                                                    pollMsgId: pollCreationKey.id,
+                                                    pollEncKey,
+                                                    voterJid,
+                                                }
+                                            );
 
                                             if (pollVote && pollVote.selectedOptions) {
-                                                console.log(`[Interaction] Detailed Decrypted Vote:`, JSON.stringify(pollVote));
+                                                console.log(`[Interaction] Decrypted vote selectedOptions count: ${pollVote.selectedOptions.length}`);
 
-                                                // Get original options
+                                                // Get original options from the stored poll creation message
                                                 const originalOptions = (pollMsgContent.pollCreationMessage || pollMsgContent.pollCreationMessageV3)?.options || [];
                                                 const getOptionText = (opt) => opt.optionName || opt;
 
+                                                // selectedOptions from decryptPollVote are SHA256 hashes of the option text
                                                 const selectedHashes = pollVote.selectedOptions.map(h => Buffer.from(h).toString('hex').toUpperCase());
+                                                console.log(`[Interaction] Decrypted vote hashes: ${selectedHashes.map(h => h.substring(0, 16) + '...').join(', ')}`);
 
                                                 if (selectedHashes.length > 0) {
                                                     for (const optObj of originalOptions) {
@@ -559,18 +580,19 @@ class WhatsAppService {
                                                         const optHash = crypto.createHash('sha256').update(optText, 'utf8').digest('hex').toUpperCase();
 
                                                         if (selectedHashes.includes(optHash)) {
-                                                            console.log(`[Interaction] ✅ Manual Decrypt Match: "${optText}"`);
+                                                            console.log(`[Interaction] ✅ Decrypted Match: "${optText}"`);
                                                             const result = processSelectedOption(optText, isPreCancelContext);
                                                             if (result) {
                                                                 activityStatus = result.status;
                                                                 tagToAdd = result.tag;
-                                                                console.log(`[Interaction] Manual decryption SUCCESS: ${activityStatus}`);
-                                                                // Break because we found the match
+                                                                console.log(`[Interaction] Decryption SUCCESS: ${activityStatus}`);
                                                                 break;
                                                             }
                                                         }
                                                     }
                                                 }
+                                            } else {
+                                                console.warn(`[Interaction] decryptPollVote returned no selectedOptions`);
                                             }
                                         }
                                     } else {
@@ -578,7 +600,8 @@ class WhatsAppService {
                                     }
                                 }
                             } catch (decryptErr) {
-                                console.warn(`[Interaction] Manual decryption failed:`, decryptErr.message);
+                                console.warn(`[Interaction] Decryption failed:`, decryptErr.message);
+                                console.warn(`[Interaction] Decryption stack:`, decryptErr.stack);
                             }
 
                             // ===== METHOD B: SHA-256 Hash Matching (fallback) =====
@@ -618,11 +641,10 @@ class WhatsAppService {
                                 }
                             }
 
-                            // ===== METHOD C: Safe Default =====
+                            // ===== METHOD C: NO DEFAULT — require explicit match =====
                             if (!activityStatus) {
-                                console.warn(`[Interaction] All poll detection methods failed! Defaulting to confirmed (safe).`);
-                                activityStatus = "confirmed";
-                                tagToAdd = merchant.orderConfirmTag || "Order Confirmed";
+                                console.warn(`[Interaction] ⚠️ All poll detection methods FAILED! NOT taking any action to avoid misinterpretation.`);
+                                console.warn(`[Interaction] The vote could not be decrypted. Order status will remain unchanged.`);
                             }
                         } else {
                             // 2. Basic Keyword Detection (Text messages)
