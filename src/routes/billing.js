@@ -131,8 +131,21 @@ router.get('/confirm', async (req, res) => {
         await merchant.save();
 
         // Redirect to frontend dashboard (Adjust the path as needed for your UI)
-        const frontendUrl = process.env.FRONTEND_APP_URL || "http://localhost:5173/dashboard";
-        res.redirect(`${frontendUrl}?shop=${shop}&billing=success`);
+        // Redirect logic to ensure user lands back in the embedded app
+        const apiKey = process.env.SHOPIFY_API_KEY;
+        const shopName = shop.replace(".myshopify.com", "");
+
+        // Option 1: Use the Embedded App link (Recommended)
+        // Format: https://admin.shopify.com/store/{shop}/apps/{api_key_or_handle}
+        // Since we don't always know the handle, we can try using the API Key
+
+        if (apiKey) {
+            res.redirect(`https://admin.shopify.com/store/${shopName}/apps/${apiKey}/dashboard?billing=success`);
+        } else {
+            // Fallback: Redirect to the app's direct installation URL which Shopify will wrap
+            const frontendUrl = process.env.FRONTEND_APP_URL || "https://whatomatic.vercel.app/dashboard";
+            res.redirect(`${frontendUrl}?shop=${shop}&billing=success`);
+        }
     } catch (error) {
         console.error('Activation Error:', error.response?.data || error.message);
         res.status(500).send('Billing activation failed');
