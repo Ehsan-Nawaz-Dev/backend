@@ -134,6 +134,8 @@ router.get("/callback", async (req, res) => {
       orderCancelTag: "Order Cancel By customer",
       orderConfirmReply: "Thank you! Your order has been confirmed. ✅",
       orderCancelReply: "Your order has been cancelled. ❌",
+      plan: "free",
+      billingStatus: "active",
       isActive: true,
       installedAt: new Date()
     };
