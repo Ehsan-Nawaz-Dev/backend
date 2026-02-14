@@ -7,58 +7,66 @@ const router = Router();
 // Basic analytics summary derived from ActivityLog — filtered by shop
 router.get("/", async (req, res) => {
   try {
-    const { shop } = req.query;
-    const since = new Date();
-    since.setDate(since.getDate() - 30);
+    const now = new Date();
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(now.getDate() - 30);
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(now.getDate() - 60);
 
-    let filter = { createdAt: { $gte: since } };
-    let dailyFilter = {};
-
-    // Filter by shop if provided
+    let baseFilter = {};
     if (shop) {
       const merchant = await Merchant.findOne({
         shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
       });
 
       if (merchant) {
-        filter.merchant = merchant._id;
-        dailyFilter.merchant = merchant._id;
+        baseFilter.merchant = merchant._id;
       } else {
-        // No merchant found — return empty analytics
         return res.json({
           messagesSent: 0, recoveredCarts: 0, confirmedOrders: 0,
           responseRate: 0, abandonedCheckouts: 0, delivered: 0,
           replies: 0, recoveryRate: 0, cancelled: 0, periodDays: 30,
-          dailyStats: []
+          dailyStats: [], growth: { sent: 0, recovered: 0, confirmed: 0 }
         });
       }
     }
 
-    const logs = await ActivityLog.find(filter).lean();
+    const currentLogs = await ActivityLog.find({ ...baseFilter, createdAt: { $gte: thirtyDaysAgo } }).lean();
+    const previousLogs = await ActivityLog.find({ ...baseFilter, createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } }).lean();
 
-    const totalMessages = logs.length;
-    const confirmed = logs.filter((l) => l.type === "confirmed").length;
-    const recovered = logs.filter((l) => l.type === "recovered").length;
-    const cancelled = logs.filter((l) => l.type === "cancelled").length;
+    const calculateStats = (logs) => {
+      const total = logs.length;
+      const confirmed = logs.filter((l) => l.type === "confirmed").length;
+      const recovered = logs.filter((l) => l.type === "recovered").length;
+      const cancelled = logs.filter((l) => l.type === "cancelled").length;
+      return { total, confirmed, recovered, cancelled };
+    };
 
-    const abandonedCheckouts = recovered + cancelled;
-    const delivered = totalMessages;
-    const replies = confirmed + recovered;
+    const current = calculateStats(currentLogs);
+    const previous = calculateStats(previousLogs);
+
+    const calculateGrowth = (curr, prev) => {
+      if (prev === 0) return curr > 0 ? 100 : 0;
+      return Math.round(((curr - prev) / prev) * 100);
+    };
 
     const responseRate = delivered > 0 ? Math.round((replies / delivered) * 100) : 0;
-    const recoveryRate = abandonedCheckouts > 0 ? Math.round((recovered / abandonedCheckouts) * 100) : 0;
+    const recoveryRate = abandonedCheckouts > 0 ? Math.round((current.recovered / abandonedCheckouts) * 100) : 0;
 
-    // Daily Aggregation for Bar Graph (Last 7 days)
+    const previousResponseRate = previous.total > 0 ? Math.round(((previous.confirmed + previous.recovered) / previous.total) * 100) : 0;
+
+    const growth = {
+      sent: calculateGrowth(current.total, previous.total),
+      recovered: calculateGrowth(current.recovered, previous.recovered),
+      confirmed: calculateGrowth(current.confirmed, previous.confirmed),
+      responseRate: calculateGrowth(responseRate, previousResponseRate)
+    };
+
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const matchStage = {
-      createdAt: { $gte: sevenDaysAgo },
-      ...dailyFilter
-    };
-
     const dailyAggregation = await ActivityLog.aggregate([
-      { $match: matchStage },
+      { $match: { ...baseFilter, createdAt: { $gte: sevenDaysAgo } } },
       {
         $group: {
           _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
@@ -68,7 +76,6 @@ router.get("/", async (req, res) => {
       { $sort: { "_id": 1 } }
     ]);
 
-    // Format for frontend (fill in zeros if needed)
     const dailyStats = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
@@ -82,17 +89,18 @@ router.get("/", async (req, res) => {
     }
 
     res.json({
-      messagesSent: totalMessages,
-      recoveredCarts: recovered,
-      confirmedOrders: confirmed,
+      messagesSent: current.total,
+      recoveredCarts: current.recovered,
+      confirmedOrders: current.confirmed,
       responseRate,
       abandonedCheckouts,
       delivered,
       replies,
       recoveryRate,
-      cancelled,
+      cancelled: current.cancelled,
       periodDays: 30,
-      dailyStats
+      dailyStats,
+      growth
     });
   } catch (err) {
     console.error("Error building analytics summary", err);
