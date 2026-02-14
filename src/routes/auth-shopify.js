@@ -33,8 +33,8 @@ router.get("/", (req, res) => {
   // Determine if we should use /Api or /api based on the current request path
   const apiPrefix = req.originalUrl.includes("/Api") ? "/Api" : "/api";
   const redirectUri = `${SHOPIFY_APP_URL}${apiPrefix}/auth/shopify/callback`;
-  // Add grant_options[]=per-user to force re-prompt when scopes change
-  const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${SHOPIFY_SCOPES}&redirect_uri=${encodeURIComponent(redirectUri)}&grant_options[]=per-user`;
+  // Request OFFLINE access token (permanent) by removing per-user grant options
+  const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${SHOPIFY_SCOPES}&redirect_uri=${encodeURIComponent(redirectUri)}`;
 
   console.log(`[OAuth] Redirecting ${shop} to Shopify authorization...`);
   res.redirect(installUrl);

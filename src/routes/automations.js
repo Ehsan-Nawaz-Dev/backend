@@ -21,7 +21,8 @@ router.get("/stats", async (req, res) => {
             { id: "order-confirmed-reply", name: "Post-Confirmation Reply" },
             { id: "abandoned_cart", name: "Abandoned Cart" },
             { id: "fulfillment_update", name: "Shipping Update" },
-            { id: "cancellation", name: "Order Cancellation" }
+            { id: "cancellation", name: "Order Cancellation" },
+            { id: "cancellation-verify", name: "Cancellation Verification" }
         ];
 
         const formattedStats = types.map(t => {
