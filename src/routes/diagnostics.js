@@ -28,7 +28,9 @@ router.get("/", async (req, res) => {
                 pendingConfirmTag: merchant?.pendingConfirmTag,
                 orderConfirmTag: merchant?.orderConfirmTag,
                 orderCancelTag: merchant?.orderCancelTag,
-                whatsappProvider: merchant?.whatsappProvider
+                whatsappProvider: merchant?.whatsappProvider,
+                needsReauth: merchant?.needsReauth,
+                reauthReason: merchant?.reauthReason
             },
             whatsapp: {
                 sessionInDb: {

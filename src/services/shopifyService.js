@@ -1,4 +1,5 @@
 import axios from "axios";
+import { Merchant } from "../models/Merchant.js";
 
 class ShopifyService {
     /**
@@ -98,8 +99,36 @@ class ShopifyService {
             return { success: true, data: putResponse.data.order };
         } catch (error) {
             const errorDetails = error.response?.data || error.message;
+            const status = error.response?.status;
+
             console.error(`[ShopifyService] ERROR adding tag to order ${numericOrderId}:`, errorDetails);
+
+            // Handle Authentication Errors
+            if (status === 401 || status === 403) {
+                await this.handleAuthError(shopDomain, errorDetails);
+            }
+
             return { success: false, error: JSON.stringify(errorDetails) };
+        }
+    }
+
+    /**
+     * Marks a merchant as needing re-authentication
+     */
+    async handleAuthError(shopDomain, errorDetails) {
+        console.error(`[ShopifyService] 🚨 AUTH ERROR DETECTED for ${shopDomain}`);
+        try {
+            await Merchant.findOneAndUpdate(
+                { shopDomain: { $regex: new RegExp(`^${shopDomain}$`, "i") } },
+                {
+                    needsReauth: true,
+                    reauthReason: typeof errorDetails === 'string' ? errorDetails : JSON.stringify(errorDetails),
+                    reauthDetectedAt: new Date()
+                }
+            );
+            console.log(`[ShopifyService] Merchant ${shopDomain} marked for re-authorization`);
+        } catch (err) {
+            console.error(`[ShopifyService] Failed to mark ${shopDomain} for re-auth:`, err.message);
         }
     }
 
@@ -114,7 +143,12 @@ class ShopifyService {
             });
             return response.data.order;
         } catch (error) {
+            const status = error.response?.status;
             console.error(`Error fetching Shopify order ${orderId}:`, error.message);
+
+            if (status === 401 || status === 403) {
+                await this.handleAuthError(shopDomain, error.response?.data || error.message);
+            }
             return null;
         }
     }
@@ -137,11 +171,17 @@ class ShopifyService {
             console.log(`[ShopifyService] Registered webhook: ${topic}`);
             return { success: true, data: response.data.webhook };
         } catch (error) {
+            const status = error.response?.status;
             // Webhook might already exist
-            if (error.response?.status === 422) {
+            if (status === 422) {
                 console.log(`[ShopifyService] Webhook ${topic} already exists`);
                 return { success: true, existing: true };
             }
+
+            if (status === 401 || status === 403) {
+                await this.handleAuthError(shopDomain, error.response?.data || error.message);
+            }
+
             console.error(`[ShopifyService] Error registering webhook ${topic}:`, error.response?.data || error.message);
             return { success: false, error: error.message };
         }

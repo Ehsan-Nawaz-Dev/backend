@@ -11,6 +11,34 @@ const getShopDomain = (req) => {
   return shop.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
 };
 
+// GET /api/settings/auth-status
+router.get("/auth-status", async (req, res) => {
+  try {
+    const shopDomain = getShopDomain(req);
+    if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
+
+    const merchant = await Merchant.findOne({ shopDomain });
+    if (!merchant) return res.status(404).json({ error: "Merchant not found" });
+
+    const appUrl = (process.env.SHOPIFY_APP_URL || "https://api.whatomatic.com").replace(/\/$/, "");
+
+    // Determine the API prefix (case-sensitive support)
+    const apiPrefix = req.originalUrl.includes("/Api") ? "/Api" : "/api";
+    const reauthUrl = `${appUrl}${apiPrefix}/auth/shopify?shop=${shopDomain}`;
+
+    res.json({
+      authenticated: !!merchant.shopifyAccessToken && !merchant.needsReauth,
+      needsReauth: merchant.needsReauth || false,
+      reason: merchant.reauthReason || null,
+      detectedAt: merchant.reauthDetectedAt || null,
+      reauthUrl
+    });
+  } catch (err) {
+    console.error("Error fetching auth status", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // GET /api/settings
 router.get("/", async (req, res) => {
   try {

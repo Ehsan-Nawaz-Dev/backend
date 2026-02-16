@@ -137,7 +137,10 @@ router.get("/callback", async (req, res) => {
       plan: "free",
       billingStatus: "active",
       isActive: true,
-      installedAt: new Date()
+      installedAt: new Date(),
+      needsReauth: false,
+      reauthReason: null,
+      reauthDetectedAt: null
     };
 
     const existingMerchant = await Merchant.findOne({
@@ -157,6 +160,10 @@ router.get("/callback", async (req, res) => {
       existingMerchant.timezone = shopData?.iana_timezone || existingMerchant.timezone;
       existingMerchant.country = shopData?.country_name || existingMerchant.country;
       existingMerchant.isActive = true;
+      existingMerchant.needsReauth = false;
+      existingMerchant.reauthReason = null;
+      existingMerchant.reauthDetectedAt = null;
+
       const saved = await existingMerchant.save();
       console.log(`[OAuth] Save result: ${!!saved}`);
       merchant = existingMerchant;

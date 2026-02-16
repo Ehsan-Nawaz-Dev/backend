@@ -54,6 +54,11 @@ const MerchantSchema = new mongoose.Schema(
     // Status
     isActive: { type: Boolean, default: true },
     installedAt: { type: Date },
+
+    // Re-auth System
+    needsReauth: { type: Boolean, default: false },
+    reauthReason: { type: String },
+    reauthDetectedAt: { type: Date },
   },
   { timestamps: true }
 );
