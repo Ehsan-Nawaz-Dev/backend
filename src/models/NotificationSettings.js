@@ -8,6 +8,7 @@ const NotificationSettingsSchema = new mongoose.Schema(
     notifyOnAbandoned: { type: Boolean, default: false },
     emailAlerts: { type: Boolean, default: true },
     whatsappAlerts: { type: Boolean, default: false },
+    pushNotifications: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

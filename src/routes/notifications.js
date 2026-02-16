@@ -5,7 +5,7 @@ import { NotificationSettings } from "../models/NotificationSettings.js";
 const router = Router();
 
 // Helper to resolve merchant by shop domain (for now via query param)
-const getShopDomain = (req) => req.query.shop || req.headers["x-shop-domain"]; 
+const getShopDomain = (req) => req.query.shop || req.headers["x-shop-domain"];
 
 // Resolve merchant by shop domain, creating if needed
 const resolveMerchant = async (shopDomain) => {
@@ -53,6 +53,7 @@ router.put("/", async (req, res) => {
       notifyOnAbandoned: req.body.notifyOnAbandoned,
       emailAlerts: req.body.emailAlerts,
       whatsappAlerts: req.body.whatsappAlerts,
+      pushNotifications: req.body.pushNotifications,
     };
 
     const settings = await NotificationSettings.findOneAndUpdate(
