@@ -72,11 +72,8 @@ router.get("/", async (req, res) => {
       responseRate: calculateGrowth(responseRate, previousResponseRate)
     };
 
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
     const dailyAggregation = await ActivityLog.aggregate([
-      { $match: { ...baseFilter, createdAt: { $gte: sevenDaysAgo } } },
+      { $match: { ...baseFilter, createdAt: { $gte: thirtyDaysAgo } } },
       {
         $group: {
           _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
@@ -87,7 +84,7 @@ router.get("/", async (req, res) => {
     ]);
 
     const dailyStats = [];
-    for (let i = 6; i >= 0; i--) {
+    for (let i = 29; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().split('T')[0];
