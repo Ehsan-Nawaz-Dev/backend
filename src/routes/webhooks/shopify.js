@@ -9,6 +9,7 @@ import { shopifyService } from "../../services/shopifyService.js";
 import crypto from "crypto";
 import { replacePlaceholders } from "../../utils/placeholderHelper.js";
 import { Plan } from "../../models/Plan.js";
+import { NotificationSettings } from "../../models/NotificationSettings.js";
 
 const router = Router();
 
@@ -59,11 +60,39 @@ const verifyShopifyWebhook = (req, res, next) => {
     }
 };
 
+const triggerInternalAlert = async (type, merchant, orderData) => {
+    try {
+        if (!merchant?.adminPhoneNumber) return;
+
+        const settings = await NotificationSettings.findOne({ merchant: merchant._id });
+        if (!settings?.whatsappAlerts) return;
+
+        // Check if this specific event type is enabled
+        if (type === 'confirmed' && !settings.notifyOnConfirm) return;
+        if (type === 'cancelled' && !settings.notifyOnCancel) return;
+        if (type === 'pending' && !settings.notifyOnAbandoned) return;
+
+        const orderNumber = orderData.name || orderData.order_number || `#${orderData.id}`;
+        const customerName = orderData.customer?.first_name ? `${orderData.customer.first_name} ${orderData.customer.last_name || ''}` : "Customer";
+
+        let alertMsg = `🔔 *New Alert:* ${type.toUpperCase()}\n\n`;
+        alertMsg += `*Order:* ${orderNumber}\n`;
+        alertMsg += `*Customer:* ${customerName}\n`;
+        alertMsg += `*Status:* ${type === 'confirmed' ? '✅ Confirmed' : (type === 'cancelled' ? '❌ Cancelled' : '🕒 Pending')}\n\n`;
+        alertMsg += `Check your WhatFlow dashboard for details.`;
+
+        await whatsappService.sendMessage(merchant.shopDomain, merchant.adminPhoneNumber, alertMsg);
+        console.log(`[InternalAlert] Sent ${type} alert to admin for ${merchant.shopDomain}`);
+    } catch (err) {
+        console.error("[InternalAlert] Failed to send alert:", err);
+    }
+};
+
 const logEvent = async (type, req, shopDomain) => {
     try {
         const merchant = await Merchant.findOne({ shopDomain });
         const { phone: customerPhone, name: customerName } = getCustomerData(req.body);
-        return await ActivityLog.create({
+        const log = await ActivityLog.create({
             merchant: merchant?._id,
             type,
             orderId: req.body?.id?.toString?.() || req.body?.order_id?.toString?.(),
@@ -72,6 +101,13 @@ const logEvent = async (type, req, shopDomain) => {
             message: `Shopify webhook: ${type}`,
             rawPayload: req.body,
         });
+
+        // Trigger Internal WhatsApp Alert if enabled
+        if (merchant) {
+            triggerInternalAlert(type, merchant, req.body);
+        }
+
+        return log;
     } catch (err) {
         console.error("Error logging activity", err);
     }

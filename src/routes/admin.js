@@ -11,8 +11,40 @@ import { ChatButtonSettings } from "../models/ChatButtonSettings.js";
 import { NotificationSettings } from "../models/NotificationSettings.js";
 import { Plan } from "../models/Plan.js";
 import { Lead } from "../models/Lead.js";
+import { GlobalNotification } from "../models/GlobalNotification.js";
 
 const router = Router();
+
+// GET /api/admin/broadcast - List all global notifications
+router.get("/broadcast", async (req, res) => {
+    try {
+        const broadcasts = await GlobalNotification.find().sort({ createdAt: -1 });
+        res.json(broadcasts);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch broadcasts" });
+    }
+});
+
+// POST /api/admin/broadcast - Create a new global notification
+router.post("/broadcast", async (req, res) => {
+    try {
+        const { title, message, type, targetPlan } = req.body;
+        const broadcast = await GlobalNotification.create({ title, message, type, targetPlan });
+        res.json(broadcast);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to create broadcast" });
+    }
+});
+
+// DELETE /api/admin/broadcast/:id - Remove a global notification
+router.delete("/broadcast/:id", async (req, res) => {
+    try {
+        await GlobalNotification.findByIdAndDelete(req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to delete broadcast" });
+    }
+});
 
 // GET /api/admin/merchants - List all merchants with connection status
 router.get("/merchants", async (req, res) => {

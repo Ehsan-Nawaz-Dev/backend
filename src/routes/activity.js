@@ -2,6 +2,8 @@ import { Router } from "express";
 import { ActivityLog } from "../models/ActivityLog.js";
 import { Merchant } from "../models/Merchant.js";
 
+import { GlobalNotification } from "../models/GlobalNotification.js";
+
 const router = Router();
 
 // GET /activity — Returns recent activity logs filtered by shop
@@ -14,28 +16,41 @@ router.get("/", async (req, res) => {
       return res.status(400).json({ error: "Missing shop parameter" });
     }
 
-    let filter = {};
+    const merchant = await Merchant.findOne({
+      shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
+    });
 
-    // If shop is provided, find the merchant and filter by their ID
-    if (shop) {
-      const merchant = await Merchant.findOne({
-        shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
-      });
-
-      if (merchant) {
-        filter.merchant = merchant._id;
-      } else {
-        // No merchant found for this shop — return empty
-        return res.json([]);
-      }
+    if (!merchant) {
+      return res.json([]);
     }
 
-    const logs = await ActivityLog.find(filter)
+    // 1. Fetch Merchant Specific Logs
+    const logs = await ActivityLog.find({ merchant: merchant._id })
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();
 
-    res.json(logs);
+    // 2. Fetch Global Broadcasts
+    const broadcasts = await GlobalNotification.find({ isActive: true })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    // 3. Merge and format broadcasts to match log structure for display
+    const broadcastLogs = broadcasts.map(b => ({
+      ...b,
+      isBroadcast: true,
+      type: b.type || 'info',
+      message: b.message,
+      customerName: "System",
+      createdAt: b.createdAt
+    }));
+
+    const combined = [...logs, ...broadcastLogs]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 50);
+
+    res.json(combined);
   } catch (err) {
     console.error("Error fetching activity logs", err);
     res.status(500).json({ error: "Internal server error" });
