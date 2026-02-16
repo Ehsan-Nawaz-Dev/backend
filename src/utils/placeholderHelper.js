@@ -50,7 +50,7 @@ export const replacePlaceholders = (template, data) => {
     ]) || "0.00";
 
     const price = typeof rawPrice === 'number' ? rawPrice.toFixed(2) : rawPrice;
-    const currency = order.currency || order.presentment_currency || order.order?.currency || "";
+    const currency = order.currency || order.presentment_currency || order.order?.currency || merchant?.currency || "";
 
     console.log(`[PlaceholderHelper] DEBUG - Price extracted: ${currency} ${price} (raw: ${rawPrice})`);
     const customerPhone = order.customer?.phone || order.shipping_address?.phone || order.billing_address?.phone || order.phone || "";
