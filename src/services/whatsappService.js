@@ -27,6 +27,7 @@ class WhatsAppService {
         this.io = null; // Socket.io instance
         this.sessionMessageCounts = new Map(); // shopDomain -> message count in session
         this.messageStores = new Map(); // shopDomain -> Map of msgId -> message (for poll decryption)
+        this.conflictCounts = new Map(); // shopDomain -> count of consecutive conflicts
     }
 
     // Store a message in the in-memory cache (for poll vote decryption)
@@ -353,10 +354,24 @@ class WhatsAppService {
 
                     if (isLoggedOut || (isConflict && statusCode === 401)) {
                         console.log(`Permanent disconnect (Logout/Conflict) for ${shopDomain}. Stopping auto-reconnect.`);
-                        // Don't disconnectClient here to keep auth files for manual retry if it was just a transient conflict
+                        await WhatsAppSession.findOneAndUpdate({ shopDomain }, { status: "disconnected", isConnected: false });
                     } else if (isConflict) {
-                        console.log(`Conflict detected for ${shopDomain}. Waiting 30 seconds before retry to allow old connection to expire...`);
-                        setTimeout(() => this.initializeClient(shopDomain), 30000);
+                        const count = (this.conflictCounts.get(shopDomain) || 0) + 1;
+                        this.conflictCounts.set(shopDomain, count);
+
+                        if (count > 3) {
+                            console.error(`🚨 EXCEEDED CONFLICT RETRIES for ${shopDomain}. Stopping to avoid BAN.`);
+                            await WhatsAppSession.findOneAndUpdate(
+                                { shopDomain },
+                                { status: "error", isConnected: false, errorMessage: "Persistent Connection Conflict - Is the same account used elsewhere?" }
+                            );
+                            return;
+                        }
+
+                        // Backoff retry: 30s, 60s, 90s...
+                        const delay = count * 30000;
+                        console.log(`Conflict #${count} detected for ${shopDomain}. Waiting ${delay / 1000} seconds before retry...`);
+                        setTimeout(() => this.initializeClient(shopDomain), delay);
                     } else {
                         // Regular reconnect after 10 seconds
                         console.log(`Attempting reconnect for ${shopDomain} in 10 seconds...`);
@@ -370,6 +385,7 @@ class WhatsAppService {
                     }
                 } else if (connection === "open") {
                     console.log(`WhatsApp socket ready for ${shopDomain}`);
+                    this.conflictCounts.delete(shopDomain); // Reset on success
                     const user = sock.user.id.split(":")[0];
 
                     // 1. Update WhatsApp Session
