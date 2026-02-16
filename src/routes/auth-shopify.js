@@ -270,6 +270,15 @@ async function seedMerchantData(merchant) {
       enabled: true,
       isPoll: true,
       pollOptions: ["🗑️ Yes, Cancel Order", "✅ No, Keep Order"]
+    },
+    {
+      merchant: merchant._id,
+      name: "Customer Feedback",
+      event: "orders/feedback",
+      message: `Hi {{customer_name}}! 👋\n\nHow was your experience with {{store_name}}?\n\nWe would love to get your feedback on your recent order {{order_number}}. Please rate us below:`,
+      enabled: true,
+      isPoll: true,
+      pollOptions: ["⭐⭐⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐", "⭐⭐", "⭐"]
     }
   ];
 
