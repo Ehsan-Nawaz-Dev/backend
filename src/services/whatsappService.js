@@ -29,6 +29,8 @@ class WhatsAppService {
         this.messageStores = new Map(); // shopDomain -> Map of msgId -> message (for poll decryption)
         this.conflictCounts = new Map(); // shopDomain -> count of consecutive conflicts
         this.pendingInits = new Set(); // shopDomain -> is initializing
+        this.disconnecting = new Set(); // shopDomain -> is actively disconnecting
+        this.reconnectTimeouts = new Map(); // shopDomain -> timeout ID
     }
 
     // Store a message in the in-memory cache (for poll vote decryption)
@@ -200,6 +202,7 @@ class WhatsAppService {
      */
     async useMongoDBAuthState(shopDomain) {
         const writeData = async (data, type, id) => {
+            if (this.disconnecting.has(shopDomain)) return; // Block writes during disconnect
             const json = JSON.parse(JSON.stringify(data, BufferJSON.replacer));
             await WhatsAppAuth.findOneAndUpdate(
                 { shopDomain, dataType: type, id },
@@ -284,6 +287,12 @@ class WhatsAppService {
             return { success: true, status: "pending" };
         }
         this.pendingInits.add(shopDomain);
+
+        // Clear any pending reconnects
+        if (this.reconnectTimeouts.has(shopDomain)) {
+            clearTimeout(this.reconnectTimeouts.get(shopDomain));
+            this.reconnectTimeouts.delete(shopDomain);
+        }
 
         try {
             // Close existing socket if any
@@ -380,12 +389,14 @@ class WhatsAppService {
                         const jitter = Math.floor(Math.random() * 10000);
                         const delay = (count * 30000) + jitter;
                         console.log(`Conflict #${count} detected for ${shopDomain}. Waiting ${delay / 1000} seconds before retry...`);
-                        setTimeout(() => this.initializeClient(shopDomain), delay);
+                        const timeout = setTimeout(() => this.initializeClient(shopDomain), delay);
+                        this.reconnectTimeouts.set(shopDomain, timeout);
                     } else {
                         // Regular reconnect after 10-15 seconds (with jitter)
                         const retryDelay = 10000 + Math.floor(Math.random() * 5000);
                         console.log(`Attempting reconnect for ${shopDomain} in ${retryDelay / 1000} seconds...`);
-                        setTimeout(() => this.initializeClient(shopDomain), retryDelay);
+                        const timeout = setTimeout(() => this.initializeClient(shopDomain), retryDelay);
+                        this.reconnectTimeouts.set(shopDomain, timeout);
                     }
 
                     // 4. Notify Frontend of disconnection
@@ -1059,25 +1070,45 @@ class WhatsAppService {
     }
 
     async disconnectClient(shopDomain) {
+        this.disconnecting.add(shopDomain);
+
+        // Cancel any pending reconnects
+        if (this.reconnectTimeouts.has(shopDomain)) {
+            clearTimeout(this.reconnectTimeouts.get(shopDomain));
+            this.reconnectTimeouts.delete(shopDomain);
+        }
+
         try {
             const sock = this.sockets.get(shopDomain);
             if (sock) {
                 sock.ev.removeAllListeners();
                 try {
-                    sock.logout();
+                    // Try graceful logout first
+                    if (sock.logout) await sock.logout();
                 } catch (e) {
+                    console.warn(`[Disconnect] Logout failed for ${shopDomain}, forcing close.`);
+                }
+                try {
                     sock.end();
+                } catch (e) {
+                    // ignore
                 }
                 this.sockets.delete(shopDomain);
             }
+
             await WhatsAppAuth.deleteMany({ shopDomain });
             await WhatsAppSession.findOneAndUpdate(
                 { shopDomain },
                 { isConnected: false, status: "disconnected", qrCode: null }
             );
+
+            // Wait a moment to ensure no stray writes occur
+            await WhatsAppService.delay(1000);
             return { success: true };
         } catch (error) {
             return { success: false, error: error.message };
+        } finally {
+            this.disconnecting.delete(shopDomain);
         }
     }
 
@@ -1155,6 +1186,13 @@ class WhatsAppService {
 
             if (!sock || !sock.user) {
                 if (retryCount < 2) {
+                    // Only auto-reconnect if NOT explicitly disconnected
+                    const session = await WhatsAppSession.findOne({ shopDomain });
+                    if (session?.status === 'disconnected') {
+                        console.warn(`[WhatsApp] Skip auto-connect for ${shopDomain}: Explicitly disconnected.`);
+                        return { success: false, error: "WhatsApp is disconnected. Please connect again from dashboard." };
+                    }
+
                     console.log(`[WhatsApp] Forced Re-init for ${shopDomain} (Retry ${retryCount + 1}/2)`);
                     await this.initializeClient(shopDomain);
                     await WhatsAppService.delay(10000);
