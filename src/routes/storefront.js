@@ -78,12 +78,16 @@ function generateScript({ phoneNumber, buttonText, position, color }) {
         container.style.transition = 'all 0.3s ease';
 
         const link = document.createElement('a');
-        link.href = 'https://wa.me/${normalizedPhone}?text=' + encodeURIComponent('Hi, I have a question about my order.');
+        const safePhone = '${normalizedPhone}';
+        const safeText = ${JSON.stringify(buttonText || "Chat with us")};
+        const safeColor = ${JSON.stringify(color || "#25D366")};
+
+        link.href = 'https://wa.me/' + safePhone + '?text=' + encodeURIComponent('Hi, I have a question about my order.');
         link.target = '_blank';
         link.style.textDecoration = 'none';
         link.style.display = 'flex';
         link.style.alignItems = 'center';
-        link.style.backgroundColor = '${color || "#25D366"}';
+        link.style.backgroundColor = safeColor;
         link.style.color = '#ffffff';
         link.style.padding = '12px 20px';
         link.style.borderRadius = '50px';
@@ -99,7 +103,7 @@ function generateScript({ phoneNumber, buttonText, position, color }) {
         icon.style.alignItems = 'center';
 
         const text = document.createElement('span');
-        text.innerText = '${buttonText || "Chat with us"}';
+        text.innerText = safeText;
 
         link.appendChild(icon);
         link.appendChild(text);

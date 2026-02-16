@@ -498,4 +498,53 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     res.status(200).send("ok");
 });
 
+/**
+ * MANDATORY GDPR WEBHOOKS
+ * Required for Shopify App Store Compliance
+ */
+
+// 1. Customers Data Request (GDPR)
+router.post("/gdpr/customers_data_request", verifyShopifyWebhook, async (req, res) => {
+    console.log(`[GDPR] Customer Data Request received for shop: ${req.headers["x-shopify-shop-domain"]}`);
+    // No sensitive data is stored long-term in this app outside of order logs. 
+    // Usually, you respond with 200 and handle the request asynchronously if needed.
+    res.status(200).send("ok");
+});
+
+// 2. Customers Redact (GDPR)
+router.post("/gdpr/customers_redact", verifyShopifyWebhook, async (req, res) => {
+    const { customer, shop_domain } = req.body;
+    console.log(`[GDPR] Customer Redact requested for ${customer?.email} on ${shop_domain}`);
+
+    try {
+        if (customer?.phone) {
+            const formattedPhone = customer.phone.replace(/\D/g, '');
+            // Optional: Remove specific customer from contacts if your DB has them
+            await Contact.deleteMany({ phone: { $regex: new RegExp(formattedPhone) } });
+            await ActivityLog.deleteMany({ customerPhone: { $regex: new RegExp(formattedPhone) } });
+            console.log(`[GDPR] Deleted data for customer: ${customer.email}`);
+        }
+    } catch (err) {
+        console.error(`[GDPR] Redact failed:`, err);
+    }
+
+    res.status(200).send("ok");
+});
+
+// 3. Shop Redact (GDPR)
+router.post("/gdpr/shop_redact", verifyShopifyWebhook, async (req, res) => {
+    const { shop_domain } = req.body;
+    console.log(`[GDPR] Shop Redact requested for ${shop_domain}. (Wait 48h as per policy)`);
+
+    try {
+        // Mark as fully deleted or remove data after 48h
+        // For now, we ensure the merchant is inactive
+        await Merchant.findOneAndUpdate({ shopDomain: shop_domain }, { isActive: false, shopifyAccessToken: null });
+    } catch (err) {
+        console.error(`[GDPR] Shop Redact failed:`, err);
+    }
+
+    res.status(200).send("ok");
+});
+
 export default router;

@@ -224,8 +224,10 @@ router.delete("/merchants/:shopDomain", async (req, res) => {
             await Lead.deleteMany({ merchant: merchantId });
         }
 
-        // 4. Delete Activity Logs (typically indexed by shopDomain)
-        await ActivityLog.deleteMany({ shopDomain });
+        // 4. Delete Activity Logs
+        if (merchantId) {
+            await ActivityLog.deleteMany({ merchant: merchantId });
+        }
 
         console.log(`[Admin] Successfully wiped all data for ${shopDomain}`);
         res.json({ success: true, message: `All data for ${shopDomain} has been deleted.` });

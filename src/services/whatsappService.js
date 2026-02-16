@@ -777,16 +777,6 @@ class WhatsAppService {
                             // 2. Basic Keyword Detection (Text messages)
                             const input = text.toLowerCase().trim();
                             const isPreCancelContext = log?.type === "pre-cancel";
-                            const isFeedbackContext = log?.type === "feedback-pending";
-
-                            if (isFeedbackContext) {
-                                const rating = isRatingOption(input);
-                                if (rating) {
-                                    activityStatus = "rated";
-                                    tagToAdd = `Rating: ${rating}/5`;
-                                    log.metadata = { ...log.metadata, rating, comment: text };
-                                }
-                            }
 
                             if (!activityStatus) {
                                 if (input.includes("confirm") || input.includes("yes") || input.includes("theek") || input.includes("haan") || input.includes("sahi")) {
