@@ -1055,6 +1055,23 @@ class WhatsAppService {
         };
     }
 
+    /**
+     * Checks if a phone number exists on WhatsApp.
+     */
+    async checkWhatsApp(shopDomain, phoneNumber) {
+        try {
+            const sock = this.sockets.get(shopDomain);
+            if (!sock || !sock.user) return { exists: false, error: "Not connected" };
+
+            const formatted = phoneNumber.replace(/\D/g, "");
+            const [result] = await sock.onWhatsApp(`${formatted}@s.whatsapp.net`);
+            return { exists: !!(result?.exists), jid: result?.jid };
+        } catch (err) {
+            console.error(`[WhatsApp] checkWhatsApp error for ${phoneNumber}:`, err.message);
+            return { exists: false, error: err.message };
+        }
+    }
+
     async sendMessage(shopDomain, phoneNumber, message, retryCount = 0) {
         try {
             console.log(`[WhatsApp] sendMessage called for ${shopDomain} to ${phoneNumber}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);

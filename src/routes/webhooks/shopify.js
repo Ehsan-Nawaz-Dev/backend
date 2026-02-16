@@ -83,6 +83,14 @@ const triggerInternalAlert = async (type, merchant, orderData) => {
 
         await whatsappService.sendMessage(merchant.shopDomain, merchant.adminPhoneNumber, alertMsg);
         console.log(`[InternalAlert] Sent ${type} alert to admin for ${merchant.shopDomain}`);
+
+        // NEW: Tag the order as 'Admin Notified' in Shopify
+        if (merchant.shopifyAccessToken && orderData.id) {
+            const orderId = orderData.id.toString().split('/').pop();
+            const adminTag = merchant.adminNotifiedTag || "📣 Admin Notified";
+            await shopifyService.addOrderTag(merchant.shopDomain, merchant.shopifyAccessToken, orderId, adminTag);
+            console.log(`[InternalAlert] Applied ${adminTag} to order ${orderId}`);
+        }
     } catch (err) {
         console.error("[InternalAlert] Failed to send alert:", err);
     }
@@ -186,9 +194,26 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                         return;
                     }
 
-                    // Refetch again after potential delay for the most up-to-date token
                     const updatedMerchant = await Merchant.findOne({ shopDomain });
                     console.log(`[ShopifyWebhook] Merchant found. Has accessToken: ${!!updatedMerchant?.shopifyAccessToken}, Token length: ${updatedMerchant?.shopifyAccessToken?.length || 0}`);
+
+                    // NEW: WhatsApp Presence Check
+                    const whatsappCheck = await whatsappService.checkWhatsApp(shopDomain, customerPhoneFormatted);
+                    if (!whatsappCheck.exists) {
+                        console.warn(`[ShopifyWebhook] ${customerPhoneFormatted} is NOT on WhatsApp. Tagging order...`);
+
+                        if (activity) {
+                            activity.type = 'failed';
+                            activity.message = 'Skipped: Number not on WhatsApp 📵';
+                            await activity.save();
+                        }
+
+                        if (updatedMerchant?.shopifyAccessToken) {
+                            const noWpTag = updatedMerchant.noWhatsappTag || "📵 No WhatsApp";
+                            await shopifyService.addOrderTag(shopDomain, updatedMerchant.shopifyAccessToken, orderId, noWpTag);
+                        }
+                        return;
+                    }
 
                     // FETCH COMPLETE ORDER FROM SHOPIFY API (webhook may have incomplete data)
                     let fullOrderData = order; // Default to webhook data
@@ -228,6 +253,10 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                             activity.type = 'failed';
                             activity.message = `Limit Reached (${currentLimit} messages) 🛑`;
                             await activity.save();
+                        }
+
+                        if (updatedMerchant?.shopifyAccessToken) {
+                            await shopifyService.addOrderTag(shopDomain, updatedMerchant.shopifyAccessToken, orderId, "⚠️ Limit Reached");
                         }
                         return;
                     }

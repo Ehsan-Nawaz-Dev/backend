@@ -65,6 +65,8 @@ router.put("/", async (req, res) => {
       orderConfirmTag: req.body.orderConfirmTag,
       orderCancelTag: req.body.orderCancelTag,
       pendingConfirmTag: req.body.pendingConfirmTag,
+      adminNotifiedTag: req.body.adminNotifiedTag,
+      noWhatsappTag: req.body.noWhatsappTag,
       orderConfirmReply: req.body.orderConfirmReply,
       orderCancelReply: req.body.orderCancelReply,
     };

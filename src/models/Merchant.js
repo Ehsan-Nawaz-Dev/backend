@@ -23,6 +23,8 @@ const MerchantSchema = new mongoose.Schema(
     pendingConfirmTag: { type: String, default: '🕒 Pending Confirmation' },
     orderConfirmTag: { type: String, default: '✅ Order Confirmed' },
     orderCancelTag: { type: String, default: '❌ Order Cancelled' },
+    adminNotifiedTag: { type: String, default: '📣 Admin Notified' },
+    noWhatsappTag: { type: String, default: '📵 No WhatsApp' },
 
     // Reply Messages
     orderConfirmReply: { type: String, default: 'Thank you! Your order has been confirmed. ✅' },
