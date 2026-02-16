@@ -842,36 +842,6 @@ class WhatsAppService {
                                     return; // Stop here, wait for second poll response
                                 }
 
-                                // C. FEEDBACK PROCESSING
-                                if (activityStatus === "rated" && log.orderId) {
-                                    console.log(`[Interaction] Saving Feedback for order ${log.orderId}...`);
-                                    const { Feedback } = await import("../models/Feedback.js");
-                                    const rating = log.metadata?.rating;
-
-                                    await Feedback.findOneAndUpdate(
-                                        { merchant: merchant._id, orderId: log.orderId },
-                                        {
-                                            merchant: merchant._id,
-                                            orderId: log.orderId,
-                                            customerPhone: fromCleaner,
-                                            customerName: log.customerName,
-                                            rating: rating,
-                                            comment: log.metadata?.comment || text,
-                                            sentiment: rating >= 4 ? "positive" : (rating <= 2 ? "negative" : "neutral")
-                                        },
-                                        { upsert: true }
-                                    );
-
-                                    // Tag Shopify Order
-                                    await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, log.orderId, tagToAdd);
-
-                                    log.type = "rated";
-                                    log.message = `Customer rated order: ${rating}/5 ⭐`;
-                                    await log.save();
-
-                                    await this.sendMessage(shopDomain, targetPhone, "Thank you for your feedback! It means a lot to us. 🙏");
-                                    return;
-                                }
 
                                 // B. FINAL PROCESSING (Confirmation or Verified Cancellation)
                                 const isConfirm = activityStatus === "confirmed";

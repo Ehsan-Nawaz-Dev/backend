@@ -14,7 +14,6 @@ const TemplateSchema = new mongoose.Schema(
         "admin-order-alert",
         "orders/confirmed",
         "orders/cancel_verify",
-        "orders/feedback",
       ],
       required: true,
     },

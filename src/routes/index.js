@@ -159,8 +159,6 @@ router.use("/billing", billingRouter);
 router.use("/plans", planRouter); // Register here
 router.use("/trial", trialRouter);
 router.use("/admin", adminRouter);
-import feedbackRouter from "./feedback.js";
-router.use("/feedback", feedbackRouter);
 router.use("/storefront", storefrontRouter);
 
 export default router;
