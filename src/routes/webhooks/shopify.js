@@ -160,12 +160,32 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         }
     }
 
+    const isDuplicateWebhook = async (merchantId, orderId, topic) => {
+        try {
+            const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+            const existing = await ActivityLog.findOne({
+                merchant: merchantId,
+                orderId: orderId,
+                // Topic mapping to log type
+                type: topic.includes('cancel') ? 'cancelled' : (topic.includes('abandoned') ? 'pending' : (topic.includes('fulfill') ? 'confirmed' : 'pending')),
+                createdAt: { $gt: fifteenMinutesAgo }
+            });
+            return !!existing;
+        } catch (err) {
+            return false;
+        }
+    };
+
     if (topic === "orders/create") {
         // 1. Create the Activity Log as 'pending'
         const orderId = order.id?.toString() || order.order_id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null);
         console.log(`[ShopifyWebhook] Processing order ${orderNumber} (ID: ${orderId})`);
-        console.log(`[ShopifyWebhook] Order object keys: ${Object.keys(order).join(", ")}`);
-        if (order.order) console.log(`[ShopifyWebhook] Found nested order object. Keys: ${Object.keys(order.order).join(", ")}`);
+
+        // Idempotency Check
+        if (orderId && await isDuplicateWebhook(merchant._id, orderId, topic)) {
+            console.log(`[ShopifyWebhook] Duplicate orders/create for ${orderId}. Skipping.`);
+            return res.status(200).send('ok');
+        }
 
         const activity = await ActivityLog.create({
             merchant: merchant?._id,
@@ -368,115 +388,142 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         })();
         return;
     } else if (topic === "orders/cancelled") {
+        const orderId = order.id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null);
+
+        // Idempotency Check
+        if (orderId && await isDuplicateWebhook(merchant._id, orderId, topic)) {
+            console.log(`[ShopifyWebhook] Duplicate orders/cancelled for ${orderId}. Skipping.`);
+            return res.status(200).send('ok');
+        }
+
         await logEvent("cancelled", req, shopDomain);
+        res.status(200).send("ok");
 
-        const cancelSetting = await AutomationSetting.findOne({ shopDomain, type: "cancellation" });
-        if (cancelSetting?.enabled && customerPhoneFormatted) {
-            const cancelTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/cancelled" });
-            if (cancelTemplate) {
-                let cancelMsg = cancelTemplate.message;
-                cancelMsg = replacePlaceholders(cancelMsg, { order, merchant });
-                cancelMsg = cancelMsg.replace(/{{customer_name}}/g, customerName);
+        (async () => {
+            try {
+                const cancelSetting = await AutomationSetting.findOne({ shopDomain, type: "cancellation" });
+                if (cancelSetting?.enabled && customerPhoneFormatted) {
+                    const cancelTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/cancelled" });
+                    if (cancelTemplate) {
+                        let cancelMsg = cancelTemplate.message;
+                        cancelMsg = replacePlaceholders(cancelMsg, { order, merchant });
+                        cancelMsg = cancelMsg.replace(/{{customer_name}}/g, customerName);
 
-                if (cancelTemplate.isPoll && cancelTemplate.pollOptions?.length > 0) {
-                    await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions);
-                } else {
-                    await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
+                        if (cancelTemplate.isPoll && cancelTemplate.pollOptions?.length > 0) {
+                            await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions);
+                        } else {
+                            await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
+                        }
+                    }
+
+                    // ADD SHOPIFY TAGS FOR CANCELLATION
+                    if (merchant?.shopifyAccessToken && orderId) {
+                        console.log(`[ShopifyWebhook] Applying cancel tag to order ${orderId}`);
+                        await shopifyService.addOrderTag(
+                            shopDomain,
+                            merchant.shopifyAccessToken,
+                            orderId,
+                            merchant.orderCancelTag || "Order Cancelled",
+                            [merchant.pendingConfirmTag, merchant.orderConfirmTag]
+                        );
+                    }
                 }
+            } catch (err) {
+                console.error(`[ShopifyWebhook] Error processing cancellation for ${shopDomain}:`, err);
             }
-
-            // ADD SHOPIFY TAGS FOR CANCELLATION
-            if (merchant?.shopifyAccessToken) {
-                const orderId = order.id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null);
-                if (orderId) {
-                    console.log(`[ShopifyWebhook] Applying cancel tag to order ${orderId}`);
-                    await shopifyService.addOrderTag(
-                        shopDomain,
-                        merchant.shopifyAccessToken,
-                        orderId,
-                        merchant.orderCancelTag || "Order Cancelled",
-                        [merchant.pendingConfirmTag, merchant.orderConfirmTag]
-                    );
-                }
-            }
-        }
+        })();
+        return;
     } else if (topic === "checkouts/abandoned") {
+        const orderId = order.id?.toString() || order.checkout_id?.toString();
+
+        // Idempotency Check
+        if (orderId && await isDuplicateWebhook(merchant._id, orderId, topic)) {
+            console.log(`[ShopifyWebhook] Duplicate checkouts/abandoned for ${orderId}. Skipping.`);
+            return res.status(200).send('ok');
+        }
+
         await logEvent("pending", req, shopDomain);
+        res.status(200).send("ok");
 
-        // Abandoned cart often needs a different set of data, but we use the helper for consistency
-        const abandonedTemplate = await Template.findOne({ merchant: merchant._id, event: "checkouts/abandoned" });
-        if (abandonedTemplate && abandonedTemplate.enabled && customerPhoneFormatted) {
-            let abandonedMsg = abandonedTemplate.message;
-            abandonedMsg = replacePlaceholders(abandonedMsg, { order, merchant });
-            abandonedMsg = abandonedMsg.replace(/{{customer_name}}/g, customerName);
+        (async () => {
+            try {
+                // Abandoned cart often needs a different set of data, but we use the helper for consistency
+                const abandonedTemplate = await Template.findOne({ merchant: merchant._id, event: "checkouts/abandoned" });
+                if (abandonedTemplate && abandonedTemplate.enabled && customerPhoneFormatted) {
+                    let abandonedMsg = abandonedTemplate.message;
+                    abandonedMsg = replacePlaceholders(abandonedMsg, { order, merchant });
+                    abandonedMsg = abandonedMsg.replace(/{{customer_name}}/g, customerName);
 
-            if (abandonedTemplate.isPoll && abandonedTemplate.pollOptions?.length > 0) {
-                // Usage check for abandoned cart
-                const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
-                const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
-                if ((merchant.usage || 0) >= currentLimit) {
-                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Abandoned Cart blocked)`);
-                    return res.status(200).send("ok");
-                }
+                    // Usage check for abandoned cart
+                    const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
+                    const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+                    if ((merchant.usage || 0) >= currentLimit) {
+                        console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Abandoned Cart blocked)`);
+                        return;
+                    }
 
-                const result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, abandonedMsg, abandonedTemplate.pollOptions);
-                if (result?.success) {
-                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
-                }
-            } else {
-                // Usage check for abandoned cart
-                const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
-                const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
-                if ((merchant.usage || 0) >= currentLimit) {
-                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Abandoned Cart blocked)`);
-                    return res.status(200).send("ok");
-                }
+                    let result;
+                    if (abandonedTemplate.isPoll && abandonedTemplate.pollOptions?.length > 0) {
+                        result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, abandonedMsg, abandonedTemplate.pollOptions);
+                    } else {
+                        result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, abandonedMsg);
+                    }
 
-                const result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, abandonedMsg);
-                if (result?.success) {
-                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
+                    if (result?.success) {
+                        await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
+                        await automationService.trackSent(shopDomain, "abandoned_cart");
+                    }
                 }
+            } catch (err) {
+                console.error(`[ShopifyWebhook] Error processing abandoned cart for ${shopDomain}:`, err);
             }
-        }
-        await automationService.trackSent(shopDomain, "abandoned_cart");
+        })();
+        return;
     } else if (topic === "fulfillments/update") {
-        await logEvent("confirmed", req, shopDomain);
+        const orderId = order.id?.toString() || order.order_id?.toString();
 
-        const fulfillmentTemplate = await Template.findOne({ merchant: merchant._id, event: "fulfillments/update" });
-        if (fulfillmentTemplate && fulfillmentTemplate.enabled && customerPhoneFormatted) {
-            let fulfillmentMsg = fulfillmentTemplate.message;
-            fulfillmentMsg = replacePlaceholders(fulfillmentMsg, { order, merchant });
-            fulfillmentMsg = fulfillmentMsg.replace(/{{customer_name}}/g, customerName);
-
-            if (fulfillmentTemplate.isPoll && fulfillmentTemplate.pollOptions?.length > 0) {
-                // Usage check for fulfillment
-                const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
-                const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
-                if ((merchant.usage || 0) >= currentLimit) {
-                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment blocked)`);
-                    return res.status(200).send("ok");
-                }
-
-                const result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, fulfillmentMsg, fulfillmentTemplate.pollOptions);
-                if (result?.success) {
-                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
-                }
-            } else {
-                // Usage check for fulfillment
-                const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
-                const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
-                if ((merchant.usage || 0) >= currentLimit) {
-                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment blocked)`);
-                    return res.status(200).send("ok");
-                }
-
-                const result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, fulfillmentMsg);
-                if (result?.success) {
-                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
-                }
-            }
+        // Idempotency Check
+        if (orderId && await isDuplicateWebhook(merchant._id, orderId, topic)) {
+            console.log(`[ShopifyWebhook] Duplicate fulfillments/update for ${orderId}. Skipping.`);
+            return res.status(200).send('ok');
         }
-        await automationService.trackSent(shopDomain, "fulfillment_update");
+
+        await logEvent("confirmed", req, shopDomain);
+        res.status(200).send("ok");
+
+        (async () => {
+            try {
+                const fulfillmentTemplate = await Template.findOne({ merchant: merchant._id, event: "fulfillments/update" });
+                if (fulfillmentTemplate && fulfillmentTemplate.enabled && customerPhoneFormatted) {
+                    let fulfillmentMsg = fulfillmentTemplate.message;
+                    fulfillmentMsg = replacePlaceholders(fulfillmentMsg, { order, merchant });
+                    fulfillmentMsg = fulfillmentMsg.replace(/{{customer_name}}/g, customerName);
+
+                    // Usage check
+                    const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
+                    const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+                    if ((merchant.usage || 0) >= currentLimit) {
+                        console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment blocked)`);
+                        return;
+                    }
+
+                    let result;
+                    if (fulfillmentTemplate.isPoll && fulfillmentTemplate.pollOptions?.length > 0) {
+                        result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, fulfillmentMsg, fulfillmentTemplate.pollOptions);
+                    } else {
+                        result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, fulfillmentMsg);
+                    }
+
+                    if (result?.success) {
+                        await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
+                        await automationService.trackSent(shopDomain, "fulfillment_update");
+                    }
+                }
+            } catch (err) {
+                console.error(`[ShopifyWebhook] Error processing fulfillment for ${shopDomain}:`, err);
+            }
+        })();
+        return;
     } else if (topic === "orders/paid") {
         const revenue = parseFloat(req.body?.total_price || 0);
         await automationService.trackRecovered(shopDomain, revenue);
