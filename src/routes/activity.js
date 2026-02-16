@@ -8,6 +8,11 @@ const router = Router();
 router.get("/", async (req, res) => {
   try {
     const { shop } = req.query;
+    console.log(`[Activity] Fetching for shop: ${shop}`);
+
+    if (!shop) {
+      return res.status(400).json({ error: "Missing shop parameter" });
+    }
 
     let filter = {};
 

@@ -7,11 +7,17 @@ const router = Router();
 // Basic analytics summary derived from ActivityLog — filtered by shop
 router.get("/", async (req, res) => {
   try {
+    const { shop } = req.query;
+    console.log(`[Analytics] Fetching for shop: ${shop}`);
     const now = new Date();
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(now.getDate() - 30);
     const sixtyDaysAgo = new Date();
     sixtyDaysAgo.setDate(now.getDate() - 60);
+
+    if (!shop) {
+      return res.status(400).json({ error: "Missing shop parameter" });
+    }
 
     let baseFilter = {};
     if (shop) {
@@ -26,7 +32,7 @@ router.get("/", async (req, res) => {
           messagesSent: 0, recoveredCarts: 0, confirmedOrders: 0,
           responseRate: 0, abandonedCheckouts: 0, delivered: 0,
           replies: 0, recoveryRate: 0, cancelled: 0, periodDays: 30,
-          dailyStats: [], growth: { sent: 0, recovered: 0, confirmed: 0 }
+          dailyStats: [], growth: { sent: 0, recovered: 0, confirmed: 0, responseRate: 0 }
         });
       }
     }
@@ -49,6 +55,10 @@ router.get("/", async (req, res) => {
       if (prev === 0) return curr > 0 ? 100 : 0;
       return Math.round(((curr - prev) / prev) * 100);
     };
+
+    const abandonedCheckouts = current.recovered + current.cancelled;
+    const delivered = current.total;
+    const replies = current.confirmed + current.recovered;
 
     const responseRate = delivered > 0 ? Math.round((replies / delivered) * 100) : 0;
     const recoveryRate = abandonedCheckouts > 0 ? Math.round((current.recovered / abandonedCheckouts) * 100) : 0;

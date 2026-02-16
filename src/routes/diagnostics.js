@@ -2,6 +2,8 @@ import { Router } from "express";
 import { Merchant } from "../models/Merchant.js";
 import { whatsappService } from "../services/whatsappService.js";
 import { WhatsAppSession } from "../models/WhatsAppSession.js";
+import { ActivityLog } from "../models/ActivityLog.js";
+import { AutomationStat } from "../models/AutomationStat.js";
 
 const router = Router();
 
@@ -35,6 +37,10 @@ router.get("/", async (req, res) => {
                     isConnected: whatsappSession?.isConnected
                 },
                 socketStatus: socketStatus
+            },
+            counts: {
+                activityLogs: await ActivityLog.countDocuments(merchant ? { merchant: merchant._id } : {}),
+                automationStats: await AutomationStat.countDocuments({ shopDomain: shop })
             },
             config: {
                 SHOPIFY_APP_URL: process.env.SHOPIFY_APP_URL,
