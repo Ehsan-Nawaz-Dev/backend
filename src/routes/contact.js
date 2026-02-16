@@ -1,19 +1,88 @@
 import { Router } from "express";
-import { Lead } from "../models/Lead.js";
+import { Contact } from "../models/Contact.js";
+import { Merchant } from "../models/Merchant.js";
 
 const router = Router();
 
+// Helper to resolve merchant
+const getMerchant = async (req) => {
+  const shop = req.query.shop || req.headers["x-shop-domain"];
+  if (!shop) return null;
+  return await Merchant.findOne({
+    shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
+  });
+};
+
+// GET /api/contact - List contacts for a merchant
+router.get("/", async (req, res) => {
+  try {
+    const merchant = await getMerchant(req);
+    if (!merchant) return res.status(400).json({ error: "Invalid shop" });
+
+    const contacts = await Contact.find({ merchant: merchant._id })
+      .sort({ updatedAt: -1 })
+      .limit(200);
+
+    // Format for frontend (rename _id to id if needed, though frontend usually handles it)
+    const formatted = contacts.map(c => ({
+      ...c.toObject(),
+      id: c._id
+    }));
+
+    res.json(formatted);
+  } catch (err) {
+    console.error("Error fetching contacts", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/contact - Create a new contact manually
 router.post("/", async (req, res) => {
   try {
-    const { name, email, message } = req.body;
-    if (!name || !email) {
-      return res.status(400).json({ error: "Name and email are required" });
-    }
+    const merchant = await getMerchant(req);
+    if (!merchant) return res.status(400).json({ error: "Invalid shop" });
 
-    const lead = await Lead.create({ name, email, message });
-    res.status(201).json(lead);
+    const { name, phone, email, tags, notes } = req.body;
+
+    // Clean phone
+    const cleanPhone = phone.replace(/\D/g, '');
+
+    const contact = await Contact.findOneAndUpdate(
+      { merchant: merchant._id, phone: cleanPhone },
+      {
+        $set: { name, email, tags, notes, source: 'manual' },
+        $setOnInsert: { merchant: merchant._id, phone: cleanPhone }
+      },
+      { upsert: true, new: true }
+    );
+
+    res.status(201).json({ ...contact.toObject(), id: contact._id });
   } catch (err) {
-    console.error("Error creating lead", err);
+    console.error("Error creating contact", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PUT /api/contact/:id - Update contact
+router.put("/:id", async (req, res) => {
+  try {
+    const contact = await Contact.findByIdAndUpdate(
+      req.params.id,
+      { $set: req.body },
+      { new: true }
+    );
+    res.json({ ...contact.toObject(), id: contact._id });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// DELETE /api/contact/:id - Delete contact
+router.delete("/:id", async (req, res) => {
+  try {
+    await Contact.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
 });

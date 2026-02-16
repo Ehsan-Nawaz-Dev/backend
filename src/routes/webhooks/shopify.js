@@ -10,6 +10,7 @@ import crypto from "crypto";
 import { replacePlaceholders } from "../../utils/placeholderHelper.js";
 import { Plan } from "../../models/Plan.js";
 import { NotificationSettings } from "../../models/NotificationSettings.js";
+import { Contact } from "../../models/Contact.js";
 
 const router = Router();
 
@@ -175,6 +176,28 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             customerPhone: customerPhoneFormatted,
             rawPayload: order
         });
+
+        // NEW: Save Customer to Contacts
+        if (customerPhoneFormatted && merchant) {
+            try {
+                await Contact.findOneAndUpdate(
+                    { merchant: merchant._id, phone: customerPhoneFormatted },
+                    {
+                        $set: {
+                            name: customerName,
+                            email: order.customer?.email,
+                            lastOrderAt: new Date(),
+                            source: 'shopify'
+                        },
+                        $inc: { totalOrders: 1 }
+                    },
+                    { upsert: true }
+                );
+                console.log(`[Contact] Saved/Updated contact ${customerName} for ${shopDomain}`);
+            } catch (contactErr) {
+                console.error(`[Contact] Failed to save contact:`, contactErr.message);
+            }
+        }
 
         res.status(200).send('ok'); // Tell Shopify we got it
 
