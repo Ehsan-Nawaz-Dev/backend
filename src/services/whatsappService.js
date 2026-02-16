@@ -28,6 +28,7 @@ class WhatsAppService {
         this.sessionMessageCounts = new Map(); // shopDomain -> message count in session
         this.messageStores = new Map(); // shopDomain -> Map of msgId -> message (for poll decryption)
         this.conflictCounts = new Map(); // shopDomain -> count of consecutive conflicts
+        this.pendingInits = new Set(); // shopDomain -> is initializing
     }
 
     // Store a message in the in-memory cache (for poll vote decryption)
@@ -278,6 +279,12 @@ class WhatsAppService {
     }
 
     async initializeClient(shopDomain) {
+        if (this.pendingInits.has(shopDomain)) {
+            console.log(`[WhatsApp] Skip initialize for ${shopDomain} - already in progress.`);
+            return { success: true, status: "pending" };
+        }
+        this.pendingInits.add(shopDomain);
+
         try {
             // Close existing socket if any
             const existingSock = this.sockets.get(shopDomain);
@@ -287,9 +294,10 @@ class WhatsAppService {
                 try {
                     existingSock.end();
                 } catch (e) {
-                    console.error("Error ending socket:", e);
+                    // Silently fail if socket already closed
                 }
                 this.sockets.delete(shopDomain);
+                await WhatsAppService.delay(500); // Give it a moment to clear
             }
 
             const { state, saveCreds } = await this.useMongoDBAuthState(shopDomain);
@@ -368,14 +376,16 @@ class WhatsAppService {
                             return;
                         }
 
-                        // Backoff retry: 30s, 60s, 90s...
-                        const delay = count * 30000;
+                        // Backoff retry: 30s, 60s, 90s... + random jitter
+                        const jitter = Math.floor(Math.random() * 10000);
+                        const delay = (count * 30000) + jitter;
                         console.log(`Conflict #${count} detected for ${shopDomain}. Waiting ${delay / 1000} seconds before retry...`);
                         setTimeout(() => this.initializeClient(shopDomain), delay);
                     } else {
-                        // Regular reconnect after 10 seconds
-                        console.log(`Attempting reconnect for ${shopDomain} in 10 seconds...`);
-                        setTimeout(() => this.initializeClient(shopDomain), 10000);
+                        // Regular reconnect after 10-15 seconds (with jitter)
+                        const retryDelay = 10000 + Math.floor(Math.random() * 5000);
+                        console.log(`Attempting reconnect for ${shopDomain} in ${retryDelay / 1000} seconds...`);
+                        setTimeout(() => this.initializeClient(shopDomain), retryDelay);
                     }
 
                     // 4. Notify Frontend of disconnection
@@ -422,6 +432,7 @@ class WhatsAppService {
             });
 
             sock.ev.on("creds.update", saveCreds);
+            this.pendingInits.delete(shopDomain);
 
             sock.ev.on("messages.upsert", async (m) => {
                 if (m.type !== "notify") return;
@@ -964,6 +975,7 @@ class WhatsAppService {
 
             return { success: true, status: "initializing" };
         } catch (error) {
+            this.pendingInits.delete(shopDomain);
             console.error(`Error initializing Baileys for ${shopDomain}:`, error);
             return { success: false, error: error.message };
         }
