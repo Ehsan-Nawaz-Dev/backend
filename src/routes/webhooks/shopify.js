@@ -140,9 +140,11 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         return res.status(200).send("ok");
     }
 
-    const order = req.body;
+    const body = req.body;
+    const order = body.order || body; // Handle Shopify nesting
     const { phone: customerPhoneRaw, name: customerName } = getCustomerData(order);
-    const orderNumber = order.name || order.order_number || `#${order.id}`;
+    const orderId = order.id?.toString() || order.order_id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null);
+    const orderNumber = order.name || order.order_number || `#${orderId || 'N/A'}`;
 
     // Format the Customer Phone (Ensure country code)
     let customerPhoneFormatted = customerPhoneRaw;
@@ -163,11 +165,16 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     const isDuplicateWebhook = async (merchantId, orderId, topic) => {
         try {
             const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+            const type = topic.includes('cancel') ? 'cancelled' :
+                (topic.includes('abandoned') ? 'pending' :
+                    (topic.includes('fulfill') ? 'confirmed' :
+                        (topic.includes('create') ? 'pending' :
+                            (topic.includes('update') ? 'pending' : 'pending'))));
+
             const existing = await ActivityLog.findOne({
                 merchant: merchantId,
                 orderId: orderId,
-                // Topic mapping to log type
-                type: topic.includes('cancel') ? 'cancelled' : (topic.includes('abandoned') ? 'pending' : (topic.includes('fulfill') ? 'confirmed' : 'pending')),
+                type: type,
                 createdAt: { $gt: fifteenMinutesAgo }
             });
             return !!existing;
@@ -176,10 +183,9 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         }
     };
 
-    if (topic === "orders/create") {
+    if (topic === "orders/create" || (topic === "orders/updated" && order.financial_status === "pending")) {
         // 1. Create the Activity Log as 'pending'
-        const orderId = order.id?.toString() || order.order_id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null);
-        console.log(`[ShopifyWebhook] Processing order ${orderNumber} (ID: ${orderId})`);
+        console.log(`[ShopifyWebhook] Processing ${topic} for ${orderNumber} (ID: ${orderId})`);
 
         // Idempotency Check
         if (orderId && await isDuplicateWebhook(merchant._id, orderId, topic)) {
