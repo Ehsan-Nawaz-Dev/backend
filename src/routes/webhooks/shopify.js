@@ -147,18 +147,21 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     const orderNumber = order.name || order.order_number || `#${orderId || 'N/A'}`;
 
     // Format the Customer Phone (Ensure country code)
+    // Format the Customer Phone (Ensure country code)
     let customerPhoneFormatted = customerPhoneRaw;
     if (customerPhoneFormatted) {
         // Remove all non-digits
         customerPhoneFormatted = customerPhoneFormatted.replace(/\D/g, '');
 
-        if (!customerPhoneFormatted.startsWith('92')) {
-            // If it starts with 0 (e.g., 0300...), remove 0 and add 92
-            if (customerPhoneFormatted.startsWith('0')) {
-                customerPhoneFormatted = '92' + customerPhoneFormatted.substring(1);
-            } else {
-                customerPhoneFormatted = '92' + customerPhoneFormatted;
-            }
+        // If number starts with '0' (local format), assume Pakistan logic (or make this configurable later)
+        if (customerPhoneFormatted.startsWith('0')) {
+            customerPhoneFormatted = '92' + customerPhoneFormatted.substring(1);
+        }
+        // If it DOES NOT start with 0, we assume it might already have a country code.
+        // We do basic sanity check: if length is < 10, it's likely invalid or local without 0
+        else if (customerPhoneFormatted.length < 10) {
+            // Fallback assumption, maybe append default country code
+            // customerPhoneFormatted = '92' + customerPhoneFormatted; 
         }
     }
 
@@ -247,21 +250,30 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     console.log(`[ShopifyWebhook] Merchant found. Has accessToken: ${!!updatedMerchant?.shopifyAccessToken}, Token length: ${updatedMerchant?.shopifyAccessToken?.length || 0}`);
 
                     // NEW: WhatsApp Presence Check
-                    const whatsappCheck = await whatsappService.checkWhatsApp(shopDomain, customerPhoneFormatted);
-                    if (!whatsappCheck.exists) {
-                        console.warn(`[ShopifyWebhook] ${customerPhoneFormatted} is NOT on WhatsApp. Tagging order...`);
+                    try {
+                        const whatsappCheck = await whatsappService.checkWhatsApp(shopDomain, customerPhoneFormatted);
 
-                        if (activity) {
-                            activity.type = 'failed';
-                            activity.message = 'Skipped: Number not on WhatsApp 📵';
-                            await activity.save();
-                        }
+                        // Only BLOCK if explicitly returned exists: false (meaning successful check saying NO)
+                        // If 'error' is present (e.g. timeout), we proceed optimistically to try sending anyway.
+                        if (whatsappCheck.exists === false && !whatsappCheck.error) {
+                            console.warn(`[ShopifyWebhook] ${customerPhoneFormatted} is NOT on WhatsApp. Tagging order...`);
 
-                        if (updatedMerchant?.shopifyAccessToken) {
-                            const noWpTag = updatedMerchant.noWhatsappTag || "📵 No WhatsApp";
-                            await shopifyService.addOrderTag(shopDomain, updatedMerchant.shopifyAccessToken, orderId, noWpTag);
+                            if (activity) {
+                                activity.type = 'failed';
+                                activity.message = 'Skipped: Number not on WhatsApp 📵';
+                                await activity.save();
+                            }
+
+                            if (updatedMerchant?.shopifyAccessToken) {
+                                const noWpTag = updatedMerchant.noWhatsappTag || "📵 No WhatsApp";
+                                await shopifyService.addOrderTag(shopDomain, updatedMerchant.shopifyAccessToken, orderId, noWpTag);
+                            }
+                            return;
+                        } else if (whatsappCheck.error) {
+                            console.warn(`[ShopifyWebhook] WhatsApp existence check failed (${whatsappCheck.error}). Proceeding optimistically.`);
                         }
-                        return;
+                    } catch (checkErr) {
+                        console.warn(`[ShopifyWebhook] WhatsApp presence check threw error. Proceeding optimistically:`, checkErr.message);
                     }
 
                     // FETCH COMPLETE ORDER FROM SHOPIFY API (webhook may have incomplete data)
@@ -375,11 +387,14 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                         console.error(`[ShopifyWebhook] WhatsApp Error for ${shopDomain}: ${errorMsg}`);
                         throw new Error(errorMsg);
                     }
-                } else if (activity) {
-                    // If customer setting disabled but admin alert was sent, mark as confirmed/processed
-                    activity.type = 'confirmed';
-                    activity.message = 'Admin Alert Sent (Customer Disabled) ✅';
-                    await activity.save();
+                } else {
+                    console.log(`[ShopifyWebhook] Automation DISABLED for order-confirmation. Skipping.`);
+                    if (activity) {
+                        // If customer setting disabled but admin alert was sent, mark as confirmed/processed
+                        activity.type = 'confirmed';
+                        activity.message = 'Automation Disabled (Admin Alert Sent) ✅';
+                        await activity.save();
+                    }
                 }
             } catch (err) {
                 // 5. UPDATE DASHBOARD TO RED (FAILED)
