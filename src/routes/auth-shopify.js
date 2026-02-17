@@ -19,8 +19,8 @@ const FRONTEND_APP_URL = process.env.FRONTEND_APP_URL || "http://localhost:5173/
 
 // Step 1: Redirect merchant to Shopify OAuth
 // GET /api/auth/shopify?shop={shop}.myshopify.com
-router.get("/", (req, res) => {
-  const { shop } = req.query;
+router.get("/", async (req, res) => {
+  const { shop, hmac, timestamp, host } = req.query;
 
   if (!shop) {
     return res.status(400).send("Missing shop parameter");
@@ -30,10 +30,35 @@ router.get("/", (req, res) => {
     return res.status(500).send("Shopify API credentials are not configured on the server");
   }
 
-  // Determine if we should use /Api or /api based on the current request path
+  // 1. SMART CHECK: Do we already have a valid token?
+  try {
+    const merchant = await Merchant.findOne({
+      shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
+    });
+
+    if (merchant && merchant.shopifyAccessToken) {
+      try {
+        // Validate token by fetching shop info (very fast)
+        await axios.get(`https://${shop}/admin/api/2024-01/shop.json`, {
+          headers: { "X-Shopify-Access-Token": merchant.shopifyAccessToken }
+        });
+
+        console.log(`[SmartAuth] Skip OAuth: Token is VALID for ${shop}. Redirecting...`);
+        const targetUrl = new URL(FRONTEND_APP_URL);
+        targetUrl.searchParams.set("shop", shop);
+        if (host) targetUrl.searchParams.set("host", host);
+        return res.redirect(targetUrl.toString());
+      } catch (tokenErr) {
+        console.warn(`[SmartAuth] Token found but INVALID for ${shop}: ${tokenErr.message}. Forcing OAuth.`);
+      }
+    }
+  } catch (err) {
+    console.error(`[SmartAuth] Error during check: ${err.message}`);
+  }
+
+  // 2. OAUTH FLOW: If no token, proceed to Shopify
   const apiPrefix = req.originalUrl.includes("/Api") ? "/Api" : "/api";
   const redirectUri = `${SHOPIFY_APP_URL}${apiPrefix}/auth/shopify/callback`;
-  // Request OFFLINE access token (permanent) by removing per-user grant options
   const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${SHOPIFY_SCOPES}&redirect_uri=${encodeURIComponent(redirectUri)}`;
 
   console.log(`[OAuth] Redirecting ${shop} to Shopify authorization...`);
