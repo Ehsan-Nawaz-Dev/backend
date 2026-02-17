@@ -1121,6 +1121,8 @@ class WhatsAppService {
             for (const session of activeSessions) {
                 console.log(`Restoring session for ${session.shopDomain}...`);
                 this.initializeClient(session.shopDomain);
+                // Stagger connections for SAAS stability (3s delay)
+                await WhatsAppService.delay(3000);
             }
         } catch (err) {
             console.error("Error during session warmup:", err);

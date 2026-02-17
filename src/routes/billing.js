@@ -251,6 +251,16 @@ router.get('/status', async (req, res) => {
             return res.json({ plan: 'none', status: 'none', usage: 0, limit: 10 });
         }
 
+        // If merchant exists but has NO TOKEN, we must treat as 401 to trigger re-auth
+        if (!merchant.shopifyAccessToken) {
+            console.warn(`[Billing] Token missing for ${shop}. Returning 401.`);
+            return res.status(401).json({
+                error: 'Token missing',
+                message: 'Please reinstall the app.',
+                needsToken: true
+            });
+        }
+
         const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
         const limit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
 
