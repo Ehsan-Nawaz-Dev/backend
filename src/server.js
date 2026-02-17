@@ -55,7 +55,7 @@ app.get("/", (req, res) => {
 // Redirect /auth to /api/auth/shopify (Legacy/Standard Shopify support)
 app.use("/auth", (req, res) => {
   const query = new URLSearchParams(req.query).toString();
-  res.redirect(`/api/auth/shopify${query ? '?' + query : ''}`);
+  res.redirect(`/Api/auth/shopify${query ? '?' + query : ''}`);
 });
 
 // API routes - Support both lowercase and capitalized versions for maximum frontend compatibility
