@@ -539,39 +539,40 @@ class WhatsAppService {
                             return null;
                         };
 
-                        // Process intent from known selected option text in given context
-                        const processSelectedOption = (selectedText, isPreCancelCtx) => {
+                        // Process intent from known selected option text/index in given context
+                        const processSelectedOption = (selectedText, isPreCancelCtx, optionIndex = -1) => {
                             const getTagWithEmoji = (tag, defaultTag, emoji) => {
                                 const finalTag = tag || defaultTag;
                                 if (finalTag.includes(emoji)) return finalTag;
-                                // Simple heuristic: if it contains an emoji, leave it alone. If plain text, add emoji.
                                 if (/[\u{1F300}-\u{1F9FF}]/u.test(finalTag)) return finalTag;
                                 return `${emoji} ${finalTag}`;
                             };
 
-                            if (isPreCancelCtx) {
-                                if (selectedText.toLowerCase().includes("no") || selectedText.includes("✅") || selectedText.toLowerCase().includes("keep")) {
-                                    return {
-                                        status: "confirmed",
-                                        tag: getTagWithEmoji(merchant.orderConfirmTag, "Order Confirmed", "✅")
-                                    };
+                            // Priority 1: Use Position (Index) if available for better custom label support
+                            if (optionIndex !== -1) {
+                                if (isPreCancelCtx) {
+                                    // Pre-Cancel Poll: [0] "Yes, Cancel", [1] "No, Keep"
+                                    if (optionIndex === 0) return { status: "cancelled", tag: getTagWithEmoji(merchant.orderCancelTag, "Order Cancelled", "❌") };
+                                    if (optionIndex === 1) return { status: "confirmed", tag: getTagWithEmoji(merchant.orderConfirmTag, "Order Confirmed", "✅") };
                                 } else {
-                                    return {
-                                        status: "cancelled",
-                                        tag: getTagWithEmoji(merchant.orderCancelTag, "Order Cancelled", "❌")
-                                    };
+                                    // Normal Poll: [0] "Yes, Confirm", [1] "No, Cancel"
+                                    if (optionIndex === 0) return { status: "confirmed", tag: getTagWithEmoji(merchant.orderConfirmTag, "Order Confirmed", "✅") };
+                                    if (optionIndex === 1) return { status: "cancelled", tag: getTagWithEmoji(merchant.orderCancelTag, "Order Cancelled", "❌") };
+                                }
+                            }
+
+                            // Priority 2: Keyword Fallback (if no index or index > 1)
+                            if (isPreCancelCtx) {
+                                if (selectedText.toLowerCase().includes("no") || selectedText.includes("✅") || selectedText.toLowerCase().includes("keep") || selectedText.includes("Ghalti")) {
+                                    return { status: "confirmed", tag: getTagWithEmoji(merchant.orderConfirmTag, "Order Confirmed", "✅") };
+                                } else {
+                                    return { status: "cancelled", tag: getTagWithEmoji(merchant.orderCancelTag, "Order Cancelled", "❌") };
                                 }
                             } else {
                                 if (isConfirmOption(selectedText)) {
-                                    return {
-                                        status: "confirmed",
-                                        tag: getTagWithEmoji(merchant.orderConfirmTag, "Order Confirmed", "✅")
-                                    };
+                                    return { status: "confirmed", tag: getTagWithEmoji(merchant.orderConfirmTag, "Order Confirmed", "✅") };
                                 } else if (isCancelOption(selectedText)) {
-                                    return {
-                                        status: "cancelled",
-                                        tag: getTagWithEmoji(merchant.orderCancelTag, "Order Cancelled", "❌")
-                                    };
+                                    return { status: "cancelled", tag: getTagWithEmoji(merchant.orderCancelTag, "Order Cancelled", "❌") };
                                 }
                             }
                             return null;
@@ -718,13 +719,14 @@ class WhatsAppService {
                                                 // console.log(`[Interaction] Decrypted vote hashes: ${selectedHashes.map(h => h.substring(0, 16) + '...').join(', ')}`);
 
                                                 if (selectedHashes.length > 0) {
-                                                    for (const optObj of originalOptions) {
+                                                    for (let i = 0; i < originalOptions.length; i++) {
+                                                        const optObj = originalOptions[i];
                                                         const optText = getOptionText(optObj);
                                                         const optHash = crypto.createHash('sha256').update(optText, 'utf8').digest('hex').toUpperCase();
 
                                                         if (selectedHashes.includes(optHash)) {
-                                                            console.log(`[Interaction] ✅ Decrypted Match: "${optText}"`);
-                                                            const result = processSelectedOption(optText, isPreCancelContext);
+                                                            console.log(`[Interaction] ✅ Decrypted Match: "${optText}" (Index: ${i})`);
+                                                            const result = processSelectedOption(optText, isPreCancelContext, i);
                                                             if (result) {
                                                                 activityStatus = result.status;
                                                                 tagToAdd = result.tag;
@@ -776,17 +778,18 @@ class WhatsAppService {
                                         ? (template?.pollOptions || ["🗑️ Yes, Cancel Order", "✅ No, Keep Order"])
                                         : (template?.isPoll ? template.pollOptions : ["✅ Yes, Confirm", "❌ No, Cancel"]);
 
-                                    for (const option of options) {
+                                    for (let i = 0; i < options.length; i++) {
+                                        const option = options[i];
                                         const hashMethods = [
                                             crypto.createHash('sha256').update(option, 'utf8').digest('hex').toUpperCase(),
                                             crypto.createHash('sha256').update(Buffer.from(option, 'utf16le')).digest('hex').toUpperCase(),
                                             crypto.createHash('sha256').update(option, 'binary').digest('hex').toUpperCase(),
                                         ];
-                                        console.log(`[Interaction] Option "${option}" hash: ${hashMethods[0].substring(0, 16)}...`);
+                                        console.log(`[Interaction] Option "${option}" index: ${i}`);
 
                                         if (hashMethods.includes(firstHash)) {
-                                            console.log(`[Interaction] Hash match found for: "${option}"`);
-                                            const result = processSelectedOption(option, isPreCancelContext);
+                                            console.log(`[Interaction] Hash match found for: "${option}" (Index: ${i})`);
+                                            const result = processSelectedOption(option, isPreCancelContext, i);
                                             if (result) {
                                                 activityStatus = result.status;
                                                 tagToAdd = result.tag;
@@ -946,7 +949,22 @@ class WhatsAppService {
                                     replyText = merchant.orderConfirmReply || "Thank you! Order confirmed. ✅";
                                 }
                             } else {
-                                replyText = merchant.orderCancelReply || "Order cancelled as requested. ❌";
+                                try {
+                                    const cancelTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/cancelled" });
+                                    if (cancelTemplate) {
+                                        const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
+                                        if (orderData) {
+                                            const { replacePlaceholders } = await import("../utils/placeholderHelper.js");
+                                            replyText = replacePlaceholders(cancelTemplate.message, { order: orderData, merchant });
+                                        } else {
+                                            replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
+                                        }
+                                    } else {
+                                        replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
+                                    }
+                                } catch (err) {
+                                    replyText = merchant.orderCancelReply || "Your order has been cancelled. ❌";
+                                }
                             }
 
                             console.log(`[Interaction] Sending reply to: ${targetPhone}`);
