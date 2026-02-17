@@ -211,13 +211,13 @@ class ShopifyService {
         console.log(`[ShopifyService] Starting auto-setup for ${shopDomain}...`);
 
         const webhooks = [
-            { topic: "orders/create", path: "/api/webhooks/shopify" },
-            { topic: "orders/cancelled", path: "/api/webhooks/shopify" },
-            { topic: "orders/updated", path: "/api/webhooks/shopify" },
-            { topic: "checkouts/create", path: "/api/webhooks/shopify" },
-            { topic: "fulfillments/create", path: "/api/webhooks/shopify" },
-            { topic: "fulfillments/update", path: "/api/webhooks/shopify" },
-            { topic: "app/uninstalled", path: "/api/webhooks/shopify" }
+            { topic: "orders/create", path: "/Api/webhooks/shopify" },
+            { topic: "orders/cancelled", path: "/Api/webhooks/shopify" },
+            { topic: "orders/updated", path: "/Api/webhooks/shopify" },
+            { topic: "checkouts/create", path: "/Api/webhooks/shopify" },
+            { topic: "fulfillments/create", path: "/Api/webhooks/shopify" },
+            { topic: "fulfillments/update", path: "/Api/webhooks/shopify" },
+            { topic: "app/uninstalled", path: "/Api/webhooks/shopify" }
         ];
 
         const results = [];

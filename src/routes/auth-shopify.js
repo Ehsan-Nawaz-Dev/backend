@@ -203,14 +203,14 @@ router.get("/callback", async (req, res) => {
 
     // 3. Register Webhooks Automatically
     const webhooksToRegister = [
-      { topic: "orders/create", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
-      { topic: "orders/cancelled", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
-      { topic: "orders/updated", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
-      { topic: "checkouts/create", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
-      { topic: "checkouts/abandoned", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
-      { topic: "fulfillments/create", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
-      { topic: "fulfillments/update", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
-      { topic: "app/uninstalled", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` }
+      { topic: "orders/create", address: `${SHOPIFY_APP_URL}/Api/webhooks/shopify` },
+      { topic: "orders/cancelled", address: `${SHOPIFY_APP_URL}/Api/webhooks/shopify` },
+      { topic: "orders/updated", address: `${SHOPIFY_APP_URL}/Api/webhooks/shopify` },
+      { topic: "checkouts/create", address: `${SHOPIFY_APP_URL}/Api/webhooks/shopify` },
+      { topic: "checkouts/abandoned", address: `${SHOPIFY_APP_URL}/Api/webhooks/shopify` },
+      { topic: "fulfillments/create", address: `${SHOPIFY_APP_URL}/Api/webhooks/shopify` },
+      { topic: "fulfillments/update", address: `${SHOPIFY_APP_URL}/Api/webhooks/shopify` },
+      { topic: "app/uninstalled", address: `${SHOPIFY_APP_URL}/Api/webhooks/shopify` }
     ];
 
     for (const webhook of webhooksToRegister) {

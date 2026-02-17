@@ -37,6 +37,7 @@ const getCustomerData = (order) => {
 // Middleware to verify Shopify Webhook HMAC
 const verifyShopifyWebhook = (req, res, next) => {
     const hmac = req.headers["x-shopify-hmac-sha256"];
+    const shop = req.headers["x-shopify-shop-domain"];
     const secret = process.env.SHOPIFY_API_SECRET;
 
     if (!secret) {
@@ -44,23 +45,43 @@ const verifyShopifyWebhook = (req, res, next) => {
         return next();
     }
 
-    if (!hmac) return res.status(401).send("No HMAC header");
+    if (!hmac) {
+        console.error(`[ShopifyWebhook] Missing HMAC header for shop: ${shop}`);
+        return res.status(401).send("No HMAC header");
+    }
 
     // Use rawBody captured in server.js middleware for perfect HMAC matching
+    // buf in express.json is a Buffer, which is ideal for crypto.update()
     const body = req.rawBody || JSON.stringify(req.body);
-    const hash = crypto
+    const generatedHash = crypto
         .createHmac("sha256", secret)
         .update(body)
         .digest("base64");
 
-    if (hash === hmac) {
-        next();
-    } else {
-        console.error(`[ShopifyWebhook] HMAC validation FAILED for shop: ${req.headers["x-shopify-shop-domain"]}`);
-        console.error(`[ShopifyWebhook] Expected: ${hash}`);
-        console.error(`[ShopifyWebhook] Received: ${hmac}`);
-        res.status(401).send("HMAC validation failed");
+    // Timing safe comparison to satisfy security audits
+    try {
+        const hashBuffer = Buffer.from(generatedHash);
+        const hmacBuffer = Buffer.from(hmac);
+
+        if (hashBuffer.length === hmacBuffer.length && crypto.timingSafeEqual(hashBuffer, hmacBuffer)) {
+            return next();
+        }
+    } catch (err) {
+        console.warn(`[ShopifyWebhook] Timing safe comparison failed, falling back to direct match: ${err.message}`);
     }
+
+    // Fallback to direct string comparison if buffers are incompatible
+    if (generatedHash === hmac) {
+        return next();
+    }
+
+    console.error(`[ShopifyWebhook] HMAC validation FAILED for shop: ${shop}`);
+    console.error(`[ShopifyWebhook] Topic: ${req.headers["x-shopify-topic"]}`);
+    console.error(`[ShopifyWebhook] Generated (base64): ${generatedHash}`);
+    console.error(`[ShopifyWebhook] Received (base64): ${hmac}`);
+
+    // Shopify mandatory checks REQUIRE a 401 response for invalid signatures
+    res.status(401).send("HMAC validation failed");
 };
 
 const triggerInternalAlert = async (type, merchant, orderData) => {
