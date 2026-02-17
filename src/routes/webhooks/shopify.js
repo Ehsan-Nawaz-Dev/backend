@@ -16,9 +16,9 @@ const router = Router();
 
 // Bulletproof Phone & Name extraction
 const getCustomerData = (order) => {
-    // Try these 3 places for phone
-    const phone = order.customer?.phone ||
-        order.shipping_address?.phone ||
+    // Try these 3 places for phone - prioritize shipping address for delivery numbers
+    const phone = order.shipping_address?.phone ||
+        order.customer?.phone ||
         order.billing_address?.phone ||
         order.phone;
 
@@ -31,6 +31,8 @@ const getCustomerData = (order) => {
         name: `${first} ${last}`.trim()
     };
 };
+
+// ... (verifyShopifyWebhook and triggerInternalAlert remains same) ...
 
 // Middleware to verify Shopify Webhook HMAC
 const verifyShopifyWebhook = (req, res, next) => {
@@ -147,21 +149,32 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     const orderNumber = order.name || order.order_number || `#${orderId || 'N/A'}`;
 
     // Format the Customer Phone (Ensure country code)
-    // Format the Customer Phone (Ensure country code)
     let customerPhoneFormatted = customerPhoneRaw;
     if (customerPhoneFormatted) {
-        // Remove all non-digits
         customerPhoneFormatted = customerPhoneFormatted.replace(/\D/g, '');
-
-        // If number starts with '0' (local format), assume Pakistan logic (or make this configurable later)
         if (customerPhoneFormatted.startsWith('0')) {
             customerPhoneFormatted = '92' + customerPhoneFormatted.substring(1);
         }
-        // If it DOES NOT start with 0, we assume it might already have a country code.
-        // We do basic sanity check: if length is < 10, it's likely invalid or local without 0
-        else if (customerPhoneFormatted.length < 10) {
-            // Fallback assumption, maybe append default country code
-            // customerPhoneFormatted = '92' + customerPhoneFormatted; 
+    }
+
+    // --- CASE: MISSING PHONE (Common in Fulfillments) ---
+    // If phone is missing and we have an orderId, try fetching the order to get the phone
+    if (!customerPhoneFormatted && orderId && merchant.shopifyAccessToken) {
+        console.log(`[ShopifyWebhook] Phone missing for topic ${topic}. Attempting to fetch order ${orderId} for data...`);
+        try {
+            const apiOrder = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, orderId);
+            if (apiOrder) {
+                const freshData = getCustomerData(apiOrder);
+                if (freshData.phone) {
+                    customerPhoneFormatted = freshData.phone;
+                    if (customerPhoneFormatted.startsWith('0')) {
+                        customerPhoneFormatted = '92' + customerPhoneFormatted.substring(1);
+                    }
+                    console.log(`[ShopifyWebhook] Successfully recovered phone: ${customerPhoneFormatted}`);
+                }
+            }
+        } catch (err) {
+            console.warn(`[ShopifyWebhook] Failed to recover phone from API: ${err.message}`);
         }
     }
 
@@ -411,7 +424,6 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     } else if (topic === "orders/cancelled") {
         const orderId = order.id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null);
 
-        // Idempotency Check
         if (orderId && await isDuplicateWebhook(merchant._id, orderId, topic)) {
             console.log(`[ShopifyWebhook] Duplicate orders/cancelled for ${orderId}. Skipping.`);
             return res.status(200).send('ok');
@@ -423,34 +435,33 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         (async () => {
             try {
                 const cancelSetting = await AutomationSetting.findOne({ shopDomain, type: "cancellation" });
-                if (cancelSetting?.enabled && customerPhoneFormatted) {
-                    const cancelTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/cancelled" });
-                    if (cancelTemplate) {
-                        let cancelMsg = cancelTemplate.message;
-                        cancelMsg = replacePlaceholders(cancelMsg, { order, merchant });
-                        cancelMsg = cancelMsg.replace(/{{customer_name}}/g, customerName);
+                const cancelTemplate = await Template.findOne({ merchant: merchant._id, event: "orders/cancelled" });
 
-                        if (cancelTemplate.isPoll && cancelTemplate.pollOptions?.length > 0) {
-                            await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions);
-                        } else {
-                            await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
-                        }
-                    }
+                if (!cancelSetting?.enabled || !cancelTemplate?.enabled) {
+                    console.log(`[ShopifyWebhook] Cancellation skipped: setting=${!!cancelSetting?.enabled}, template=${!!cancelTemplate?.enabled}`);
+                    return;
+                }
 
-                    // ADD SHOPIFY TAGS FOR CANCELLATION
-                    if (merchant?.shopifyAccessToken && orderId) {
-                        console.log(`[ShopifyWebhook] Applying cancel tag to order ${orderId}`);
-                        await shopifyService.addOrderTag(
-                            shopDomain,
-                            merchant.shopifyAccessToken,
-                            orderId,
-                            merchant.orderCancelTag || "Order Cancelled",
-                            [merchant.pendingConfirmTag, merchant.orderConfirmTag]
-                        );
-                    }
+                if (!customerPhoneFormatted) {
+                    console.warn(`[ShopifyWebhook] Cannot send cancellation: No phone number for ${orderNumber}`);
+                    return;
+                }
+
+                let cancelMsg = cancelTemplate.message;
+                cancelMsg = replacePlaceholders(cancelMsg, { order, merchant });
+                cancelMsg = cancelMsg.replace(/{{customer_name}}/g, customerName);
+
+                if (cancelTemplate.isPoll && cancelTemplate.pollOptions?.length > 0) {
+                    await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions);
+                } else {
+                    await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
+                }
+
+                if (merchant?.shopifyAccessToken && orderId) {
+                    await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, orderId, merchant.orderCancelTag || "Order Cancelled", [merchant.pendingConfirmTag, merchant.orderConfirmTag]);
                 }
             } catch (err) {
-                console.error(`[ShopifyWebhook] Error processing cancellation for ${shopDomain}:`, err);
+                console.error(`[ShopifyWebhook] Error processing cancellation:`, err);
             }
         })();
         return;
@@ -500,10 +511,9 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             }
         })();
         return;
-    } else if (topic === "fulfillments/update") {
+    } else if (topic === "fulfillments/update" || topic === "fulfillments/create") {
         const orderId = order.id?.toString() || order.order_id?.toString();
 
-        // Idempotency Check
         if (orderId && await isDuplicateWebhook(merchant._id, orderId, topic)) {
             console.log(`[ShopifyWebhook] Duplicate fulfillments/update for ${orderId}. Skipping.`);
             return res.status(200).send('ok');
@@ -514,34 +524,39 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
         (async () => {
             try {
-                const fulfillmentTemplate = await Template.findOne({ merchant: merchant._id, event: "fulfillments/update" });
-                if (fulfillmentTemplate && fulfillmentTemplate.enabled && customerPhoneFormatted) {
-                    let fulfillmentMsg = fulfillmentTemplate.message;
-                    fulfillmentMsg = replacePlaceholders(fulfillmentMsg, { order, merchant });
-                    fulfillmentMsg = fulfillmentMsg.replace(/{{customer_name}}/g, customerName);
+                const setting = await AutomationSetting.findOne({ shopDomain, type: "shipment-update" }) || await AutomationSetting.findOne({ shopDomain, type: "fulfillment_update" });
+                const template = await Template.findOne({ merchant: merchant._id, event: "fulfillments/update" });
 
-                    // Usage check
-                    const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
-                    const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
-                    if ((merchant.usage || 0) >= currentLimit) {
-                        console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment blocked)`);
-                        return;
-                    }
+                if (!setting?.enabled || !template?.enabled) {
+                    console.log(`[ShopifyWebhook] Fulfillment skipped: setting=${!!setting?.enabled}, template=${!!template?.enabled}`);
+                    return;
+                }
 
-                    let result;
-                    if (fulfillmentTemplate.isPoll && fulfillmentTemplate.pollOptions?.length > 0) {
-                        result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, fulfillmentMsg, fulfillmentTemplate.pollOptions);
-                    } else {
-                        result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, fulfillmentMsg);
-                    }
+                if (!customerPhoneFormatted) {
+                    console.warn(`[ShopifyWebhook] Cannot send fulfillment: No phone number for ${orderNumber}`);
+                    return;
+                }
 
-                    if (result?.success) {
-                        await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
-                        await automationService.trackSent(shopDomain, "fulfillment_update");
-                    }
+                // Plan limit check
+                const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
+                const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+                if ((merchant.usage || 0) >= currentLimit) {
+                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment blocked)`);
+                    return;
+                }
+
+                let fulfillmentMsg = template.message;
+                fulfillmentMsg = replacePlaceholders(fulfillmentMsg, { order, merchant });
+                fulfillmentMsg = fulfillmentMsg.replace(/{{customer_name}}/g, customerName);
+
+                const result = template.isPoll ? await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, fulfillmentMsg, template.pollOptions) : await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, fulfillmentMsg);
+
+                if (result?.success) {
+                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
+                    await automationService.trackSent(shopDomain, "fulfillment_update");
                 }
             } catch (err) {
-                console.error(`[ShopifyWebhook] Error processing fulfillment for ${shopDomain}:`, err);
+                console.error(`[ShopifyWebhook] Error processing fulfillment:`, err);
             }
         })();
         return;
