@@ -16,7 +16,7 @@ class AutomationService {
     async trackRecovered(shopDomain, revenue = 0) {
         try {
             await AutomationStat.findOneAndUpdate(
-                { shopDomain, type: "abandoned_cart" },
+                { shopDomain, type: "abandoned-cart" },
                 { $inc: { recovered: 1, revenue: revenue } },
                 { upsert: true, new: true }
             );

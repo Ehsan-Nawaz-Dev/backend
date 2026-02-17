@@ -207,6 +207,7 @@ router.get("/callback", async (req, res) => {
       { topic: "orders/cancelled", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
       { topic: "orders/updated", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
       { topic: "checkouts/create", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
+      { topic: "checkouts/abandoned", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
       { topic: "fulfillments/create", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
       { topic: "fulfillments/update", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` },
       { topic: "app/uninstalled", address: `${SHOPIFY_APP_URL}/api/webhooks/shopify` }
@@ -284,7 +285,7 @@ async function seedMerchantData(merchant) {
     {
       merchant: merchant._id,
       name: "Cart Recovery",
-      event: "checkouts/create",
+      event: "checkouts/abandoned",
       message: `Hi {{customer_name}}, you left something in your cart! 🛒\n\nClick here to finish your purchase: {{cart_link}}\n\nThank you for visiting {{store_name}}!`,
       enabled: true,
       isPoll: false
@@ -319,8 +320,12 @@ async function seedMerchantData(merchant) {
   // 2. Create Default Automation Settings
   const defaultAutomations = [
     { shopDomain: shopDomain, type: "order-confirmation", enabled: true },
-    { shopDomain: shopDomain, type: "abandoned-cart", enabled: false },
-    { shopDomain: shopDomain, type: "shipment-update", enabled: true }
+    { shopDomain: shopDomain, type: "abandoned-cart", enabled: true },
+    { shopDomain: shopDomain, type: "shipment-update", enabled: true },
+    { shopDomain: shopDomain, type: "cancellation", enabled: true },
+    { shopDomain: shopDomain, type: "cancellation-verify", enabled: true },
+    { shopDomain: shopDomain, type: "order-confirmed-reply", enabled: true },
+    { shopDomain: shopDomain, type: "admin-order-alert", enabled: true }
   ];
 
   for (const automation of defaultAutomations) {
