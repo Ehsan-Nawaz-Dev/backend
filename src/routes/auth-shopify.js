@@ -284,6 +284,14 @@ async function seedMerchantData(merchant) {
     },
     {
       merchant: merchant._id,
+      name: "Order Confirmed Reply",
+      event: "orders/confirmed",
+      message: `Thank you {{customer_name}}! your order {{order_number}} has been confirmed. ✅ We will notify you when it ships.`,
+      enabled: true,
+      isPoll: false
+    },
+    {
+      merchant: merchant._id,
       name: "Cart Recovery",
       event: "checkouts/abandoned",
       message: `Hi {{customer_name}}, you left something in your cart! 🛒\n\nClick here to finish your purchase: {{cart_link}}\n\nThank you for visiting {{store_name}}!`,
