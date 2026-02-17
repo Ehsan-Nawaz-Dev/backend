@@ -57,11 +57,12 @@ router.get("/", async (req, res) => {
   }
 
   // 2. OAUTH FLOW: If no token, proceed to Shopify
-  const apiPrefix = req.originalUrl.includes("/Api") ? "/Api" : "/api";
-  const redirectUri = `${SHOPIFY_APP_URL}${apiPrefix}/auth/shopify/callback`;
+  // NOTE: Shopify redirect URIs are CASE SENSITIVE. 
+  // We MUST use /Api/ as whitelisted in your Partner Dashboard.
+  const redirectUri = `${SHOPIFY_APP_URL}/Api/auth/shopify/callback`;
   const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${SHOPIFY_SCOPES}&redirect_uri=${encodeURIComponent(redirectUri)}`;
 
-  console.log(`[OAuth] Redirecting ${shop} to Shopify authorization...`);
+  console.log(`[OAuth] [START] Initiating flow for ${shop}. Redirecting to: ${installUrl}`);
   res.redirect(installUrl);
 });
 
@@ -69,9 +70,11 @@ router.get("/", async (req, res) => {
 // GET /api/auth/shopify/callback?shop=...&code=...&hmac=...
 router.get("/callback", async (req, res) => {
   const { shop, code, hmac } = req.query;
+  console.log(`[OAuth] [CALLBACK] Hit for shop: ${shop}. Code present: ${!!code}. HMAC: ${hmac}`);
 
   if (!shop || !code) {
-    return res.status(400).send("Missing required parameters");
+    console.warn(`[OAuth] [CALLBACK] Missing shop or code. Redirecting to auth start.`);
+    return res.redirect(`/Api/auth/shopify?shop=${shop}`);
   }
 
   // Verify HMAC (if provided) for security
@@ -106,10 +109,10 @@ router.get("/callback", async (req, res) => {
       code
     });
     accessToken = tokenResponse.data.access_token;
-    console.log(`[OAuth] Got access token for ${shop}`);
+    console.log(`[OAuth] [TOKEN] Successfully exchanged code for ${shop}`);
   } catch (tokenError) {
     // Handle "authorization code was not found or was already used"
-    console.warn(`[OAuth] Failed to exchange token: ${tokenError.response?.data?.error_description || tokenError.message}`);
+    console.error(`[OAuth] [TOKEN_ERROR] Failed to exchange token for ${shop}: ${tokenError.response?.data?.error_description || tokenError.message}`);
 
     // Check if we already have a valid merchant token from the FIRST request
     const existing = await Merchant.findOne({
