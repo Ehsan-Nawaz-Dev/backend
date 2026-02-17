@@ -181,11 +181,22 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     const isDuplicateWebhook = async (merchantId, orderId, topic) => {
         try {
             const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+
+            // For Order notifications, we check if ANY activity (pending or processed) exists
+            if (topic.includes('orders/create') || topic.includes('orders/updated')) {
+                const existing = await ActivityLog.findOne({
+                    merchant: merchantId,
+                    orderId: orderId,
+                    type: { $in: ['pending', 'confirmed', 'cancelled'] },
+                    createdAt: { $gt: fifteenMinutesAgo }
+                });
+                return !!existing;
+            }
+
+            // For other topics, use specific type matches
             const type = topic.includes('cancel') ? 'cancelled' :
                 (topic.includes('abandoned') ? 'pending' :
-                    (topic.includes('fulfill') ? 'confirmed' :
-                        (topic.includes('create') ? 'pending' :
-                            (topic.includes('update') ? 'pending' : 'pending'))));
+                    (topic.includes('fulfill') ? 'confirmed' : 'pending'));
 
             const existing = await ActivityLog.findOne({
                 merchant: merchantId,
