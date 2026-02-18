@@ -267,8 +267,18 @@ router.get('/status', async (req, res) => {
         }
 
         if (!merchant.shopifyAccessToken && hasActivePlan) {
-            // Has active plan but no token — log warning but let them through
-            console.warn(`[Billing] Token missing for ${shop} but has active ${merchant.plan} plan. Allowing through.`);
+            // Has active plan but no token — return status with needsToken flag
+            console.warn(`[Billing] Token missing for ${shop} but has active ${merchant.plan} plan. Returning status with needsToken flag.`);
+            const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
+            const limit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+            return res.json({
+                plan: merchant.plan || 'free',
+                status: merchant.billingStatus || 'none',
+                usage: merchant.usage || 0,
+                limit: limit,
+                needsToken: true,
+                authenticated: false
+            });
         }
 
         const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
