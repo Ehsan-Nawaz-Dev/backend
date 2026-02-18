@@ -251,14 +251,24 @@ router.get('/status', async (req, res) => {
             return res.json({ plan: 'none', status: 'none', usage: 0, limit: 10 });
         }
 
-        // If merchant exists but has NO TOKEN, we must treat as 401 to trigger re-auth
-        if (!merchant.shopifyAccessToken) {
-            console.warn(`[Billing] Token missing for ${shop}. Returning 401.`);
+        // If merchant has an active plan (free or trial), allow through even without token
+        // Token is only strictly needed for paid Shopify subscription plans
+        const hasActivePlan = merchant.billingStatus === 'active' && merchant.plan;
+        const isFreeOrTrial = merchant.plan === 'free' || merchant.plan === 'trial';
+
+        if (!merchant.shopifyAccessToken && !hasActivePlan) {
+            // No token AND no active plan — needs re-auth
+            console.warn(`[Billing] Token missing for ${shop} and no active plan. Returning 401.`);
             return res.status(401).json({
                 error: 'Token missing',
                 message: 'Please reinstall the app.',
                 needsToken: true
             });
+        }
+
+        if (!merchant.shopifyAccessToken && hasActivePlan) {
+            // Has active plan but no token — log warning but let them through
+            console.warn(`[Billing] Token missing for ${shop} but has active ${merchant.plan} plan. Allowing through.`);
         }
 
         const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
