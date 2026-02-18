@@ -8,6 +8,7 @@ import { Template } from "../../models/Template.js";
 import { shopifyService } from "../../services/shopifyService.js";
 import crypto from "crypto";
 import { replacePlaceholders } from "../../utils/placeholderHelper.js";
+import { normalizePhoneNumber } from "../../utils/phoneNormalizer.js";
 import { Plan } from "../../models/Plan.js";
 import { NotificationSettings } from "../../models/NotificationSettings.js";
 import { Contact } from "../../models/Contact.js";
@@ -169,14 +170,8 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     const orderId = order.id?.toString() || order.order_id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null);
     const orderNumber = order.name || order.order_number || `#${orderId || 'N/A'}`;
 
-    // Format the Customer Phone (Ensure country code)
-    let customerPhoneFormatted = customerPhoneRaw;
-    if (customerPhoneFormatted) {
-        customerPhoneFormatted = customerPhoneFormatted.replace(/\D/g, '');
-        if (customerPhoneFormatted.startsWith('0')) {
-            customerPhoneFormatted = '92' + customerPhoneFormatted.substring(1);
-        }
-    }
+    // Format the Customer Phone (auto-detect country from order address)
+    let customerPhoneFormatted = normalizePhoneNumber(customerPhoneRaw, order);
 
     // --- CASE: MISSING PHONE (Common in Fulfillments) ---
     // If phone is missing and we have an orderId, try fetching the order to get the phone
@@ -187,10 +182,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             if (apiOrder) {
                 const freshData = getCustomerData(apiOrder);
                 if (freshData.phone) {
-                    customerPhoneFormatted = freshData.phone;
-                    if (customerPhoneFormatted.startsWith('0')) {
-                        customerPhoneFormatted = '92' + customerPhoneFormatted.substring(1);
-                    }
+                    customerPhoneFormatted = normalizePhoneNumber(freshData.phone, apiOrder);
                     console.log(`[ShopifyWebhook] Successfully recovered phone: ${customerPhoneFormatted}`);
                 }
             }
