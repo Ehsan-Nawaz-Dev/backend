@@ -38,6 +38,14 @@ router.post('/create', async (req, res) => {
             merchant.shopifySubscriptionId = null;
             await merchant.save();
 
+            // If merchant has no token yet, redirect to OAuth to get it
+            if (!merchant.shopifyAccessToken) {
+                console.log(`[Billing] Free plan activated but NO TOKEN for ${shop}. Redirecting to OAuth.`);
+                const authUrl = `${SHOPIFY_APP_URL}/Api/auth/shopify?shop=${shop}`;
+                return res.json({ confirmationUrl: authUrl });
+            }
+
+            // Normal flow - merchant has token, go to billing success
             const shopName = shop.replace(".myshopify.com", "");
             if (SHOPIFY_API_KEY) {
                 return res.json({ confirmationUrl: `https://admin.shopify.com/store/${shopName}/apps/${SHOPIFY_API_KEY}/billing-success?shop=${shop}` });
