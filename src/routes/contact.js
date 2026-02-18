@@ -47,14 +47,23 @@ router.post("/", async (req, res) => {
     // Clean phone
     const cleanPhone = phone.replace(/\D/g, '');
 
-    const contact = await Contact.findOneAndUpdate(
-      { merchant: merchant._id, phone: cleanPhone },
-      {
-        $set: { name, email, tags, notes, source: 'manual' },
-        $setOnInsert: { merchant: merchant._id, phone: cleanPhone }
-      },
-      { upsert: true, new: true }
-    );
+    // Check if contact with this phone already exists for this merchant
+    const existing = await Contact.findOne({ merchant: merchant._id, phone: cleanPhone });
+    if (existing) {
+      return res.status(409).json({
+        error: `Contact with phone number ${phone} already exists (${existing.name})`
+      });
+    }
+
+    const contact = await Contact.create({
+      merchant: merchant._id,
+      name,
+      phone: cleanPhone,
+      email,
+      tags,
+      notes,
+      source: 'manual'
+    });
 
     res.status(201).json({ ...contact.toObject(), id: contact._id });
   } catch (err) {
