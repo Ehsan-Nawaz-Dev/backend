@@ -70,7 +70,7 @@ router.post('/create', async (req, res) => {
                     appSubscriptionCreate(
                         name: $name
                         returnUrl: $returnUrl
-                        test: true
+                        test: $test
                         lineItems: $lineItems
                     ) {
                         confirmationUrl
