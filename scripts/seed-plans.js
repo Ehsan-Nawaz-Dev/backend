@@ -50,7 +50,7 @@ const plans = [
         isPopular: true
     },
     {
-        id: "pro",
+        id: "professional",
         name: "Professional",
         price: 14.99,
         messageLimit: 4250,

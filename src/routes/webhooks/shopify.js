@@ -684,7 +684,8 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             let matchedPlanId = 'free';
             if (subscriptionName.includes('starter')) matchedPlanId = 'starter';
             else if (subscriptionName.includes('growth')) matchedPlanId = 'growth';
-            else if (subscriptionName.includes('pro')) matchedPlanId = 'pro';
+            else if (subscriptionName.includes('professional')) matchedPlanId = 'professional';
+            else if (subscriptionName.includes('pro')) matchedPlanId = 'professional';
             else if (subscriptionName.includes('trial')) matchedPlanId = 'trial';
 
             console.log(`[ShopifyWebhook] Activating plan '${matchedPlanId}' for ${shopDomain}`);
