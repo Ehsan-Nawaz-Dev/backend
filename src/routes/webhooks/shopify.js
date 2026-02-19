@@ -159,6 +159,39 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         return res.status(200).send("ok");
     }
 
+    // --- MANDATORY GDPR COMPLIANCE WEBHOOKS ---
+    // These are required for Shopify App Store approval
+    if (topic === "customers/data_request") {
+        console.log(`[GDPR] Customer Data Request received for shop: ${shopDomain}`);
+        return res.status(200).send("ok");
+    }
+
+    if (topic === "customers/redact") {
+        const { customer, shop_domain } = req.body;
+        console.log(`[GDPR] Customer Redact requested for ${customer?.email} on ${shop_domain || shopDomain}`);
+        try {
+            if (customer?.phone) {
+                const formattedPhone = customer.phone.replace(/\D/g, '');
+                await Contact.deleteMany({ phone: { $regex: new RegExp(formattedPhone) } });
+                await ActivityLog.deleteMany({ customerPhone: { $regex: new RegExp(formattedPhone) } });
+            }
+        } catch (err) {
+            console.error(`[GDPR] Redact failed:`, err);
+        }
+        return res.status(200).send("ok");
+    }
+
+    if (topic === "shop/redact") {
+        const { shop_domain } = req.body;
+        console.log(`[GDPR] Shop Redact requested for ${shop_domain || shopDomain}`);
+        try {
+            await Merchant.findOneAndUpdate({ shopDomain: shop_domain || shopDomain }, { isActive: false, shopifyAccessToken: null });
+        } catch (err) {
+            console.error(`[GDPR] Shop Redact failed:`, err);
+        }
+        return res.status(200).send("ok");
+    }
+
     const merchant = await Merchant.findOne({ shopDomain });
     if (!merchant) {
         console.warn(`No merchant found for shop: ${shopDomain}`);
