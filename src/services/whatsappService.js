@@ -555,13 +555,53 @@ class WhatsAppService {
                         let log = null;
 
                         if (isLidFormat && isPollUpdate) {
-                            // Focus on the most recent actionable activity for this customer on this shop
-                            log = await ActivityLog.findOne({
-                                merchant: merchant._id,
-                                type: { $in: ["pending", "pre-cancel", "feedback-pending"] },
-                                createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) }
-                            }).sort({ createdAt: -1 });
-                            console.log(`[Interaction] LID poll lookup: found log? ${!!log}, type: ${log?.type}, orderId: ${log?.orderId}, createdAt: ${log?.createdAt?.toISOString()}`);
+                            // CRITICAL FIX: Match poll vote to the CORRECT customer's order
+                            // LID JIDs can't be mapped to phone numbers directly, but we can
+                            // identify the customer from the poll creation message key
+                            const pollCreationKey = msg.message.pollUpdateMessage?.pollCreationMessageKey;
+                            let customerPhoneFromPoll = null;
+
+                            // Method 1: Get phone from pollCreationKey.remoteJid (e.g. "923182668034@s.whatsapp.net")
+                            if (pollCreationKey?.remoteJid && !pollCreationKey.remoteJid.includes('@lid')) {
+                                customerPhoneFromPoll = pollCreationKey.remoteJid.split("@")[0].split(":")[0].replace(/\D/g, "");
+                                console.log(`[Interaction] LID poll: got customer phone from remoteJid: ${customerPhoneFromPoll}`);
+                            }
+
+                            // Method 2: Look up stored PollMessage in MongoDB by message ID
+                            if (!customerPhoneFromPoll && pollCreationKey?.id) {
+                                try {
+                                    const storedPoll = await PollMessage.findOne({ shopDomain, messageKeyId: pollCreationKey.id });
+                                    if (storedPoll?.customerPhone) {
+                                        customerPhoneFromPoll = storedPoll.customerPhone.replace(/\D/g, "");
+                                        console.log(`[Interaction] LID poll: got customer phone from PollMessage DB: ${customerPhoneFromPoll}`);
+                                    }
+                                } catch (pollLookupErr) {
+                                    console.warn(`[Interaction] LID poll: PollMessage lookup error:`, pollLookupErr.message);
+                                }
+                            }
+
+                            // Use customer phone to find the EXACT matching ActivityLog
+                            if (customerPhoneFromPoll) {
+                                const phoneSuffix = customerPhoneFromPoll.slice(-9);
+                                log = await ActivityLog.findOne({
+                                    merchant: merchant._id,
+                                    customerPhone: new RegExp(phoneSuffix + "$"),
+                                    type: { $in: ["pending", "pre-cancel", "feedback-pending"] },
+                                    createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) }
+                                }).sort({ createdAt: -1 });
+                                console.log(`[Interaction] LID poll: matched by phone ${customerPhoneFromPoll} → log found: ${!!log}, orderId: ${log?.orderId}, type: ${log?.type}`);
+                            }
+
+                            // FALLBACK: If we still couldn't find a log (shouldn't happen normally)
+                            if (!log) {
+                                console.warn(`[Interaction] LID poll: Could not match by customer phone, falling back to merchant-wide lookup`);
+                                log = await ActivityLog.findOne({
+                                    merchant: merchant._id,
+                                    type: { $in: ["pending", "pre-cancel", "feedback-pending"] },
+                                    createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) }
+                                }).sort({ createdAt: -1 });
+                                console.log(`[Interaction] LID poll: FALLBACK found log: ${!!log}, orderId: ${log?.orderId}, type: ${log?.type}`);
+                            }
                         } else {
                             const phoneSuffix = fromCleaner.slice(-9);
                             if (phoneSuffix) {
