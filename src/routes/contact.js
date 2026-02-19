@@ -6,7 +6,7 @@ const router = Router();
 
 // Helper to resolve merchant
 const getMerchant = async (req) => {
-  const shop = req.query.shop || req.headers["x-shop-domain"];
+  const shop = req.shopifyShop || req.query.shop || req.headers["x-shop-domain"];
   if (!shop) return null;
   return await Merchant.findOne({
     shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }

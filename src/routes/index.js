@@ -18,6 +18,7 @@ import billingRouter from "./billing.js";
 import trialRouter from "./trial.js";
 import adminRouter from "./admin.js";
 import storefrontRouter from "./storefront.js";
+import { verifySessionToken } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -136,28 +137,28 @@ router.get("/", (req, res) => {
     });
 });
 
-router.use("/settings", settingsRouter);
-router.use("/templates", templatesRouter);
+router.use("/settings", verifySessionToken, settingsRouter);
+router.use("/templates", verifySessionToken, templatesRouter);
 router.use("/webhooks/shopify", shopifyWebhooksRouter);
 router.use("/webhooks/whatsapp", whatsappWebhooksRouter);
-router.use("/activity", activityRouter);
-router.use("/contact", contactRouter);
-router.use("/notifications", notificationsRouter);
-router.use("/analytics", analyticsRouter);
+router.use("/activity", verifySessionToken, activityRouter);
+router.use("/contact", verifySessionToken, contactRouter);
+router.use("/notifications", verifySessionToken, notificationsRouter);
+router.use("/analytics", verifySessionToken, analyticsRouter);
 router.use("/auth/shopify", shopifyAuthRouter);
-router.use("/whatsapp", whatsappRouter);
-router.use("/whatsapp-cloud", whatsappCloudRouter);
-router.use("/qrcode", qrcodeRouter);
-router.use("/automations", automationsRouter);
-router.use("/campaigns", campaignsRouter);
-router.use("/diagnostics", diagnosticsRouter);
+router.use("/whatsapp", verifySessionToken, whatsappRouter);
+router.use("/whatsapp-cloud", verifySessionToken, whatsappCloudRouter);
+router.use("/qrcode", verifySessionToken, qrcodeRouter);
+router.use("/automations", verifySessionToken, automationsRouter);
+router.use("/campaigns", verifySessionToken, campaignsRouter);
+router.use("/diagnostics", verifySessionToken, diagnosticsRouter);
 import planRouter from "./plans.js";
 
 // ... previous imports
 
-router.use("/billing", billingRouter);
+router.use("/billing", verifySessionToken, billingRouter);
 router.use("/plans", planRouter); // Register here
-router.use("/trial", trialRouter);
+router.use("/trial", verifySessionToken, trialRouter);
 router.use("/admin", adminRouter);
 router.use("/storefront", storefrontRouter);
 

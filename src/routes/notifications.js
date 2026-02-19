@@ -5,7 +5,12 @@ import { NotificationSettings } from "../models/NotificationSettings.js";
 const router = Router();
 
 // Helper to resolve merchant by shop domain (for now via query param)
-const getShopDomain = (req) => req.query.shop || req.headers["x-shop-domain"];
+const getShopDomain = (req) => {
+  if (req.shopifyShop) return req.shopifyShop;
+  const shop = req.query.shop || req.headers["x-shop-domain"];
+  if (!shop) return null;
+  return shop.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+};
 
 // Resolve merchant by shop domain, creating if needed
 const resolveMerchant = async (shopDomain) => {

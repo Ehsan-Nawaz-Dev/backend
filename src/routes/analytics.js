@@ -7,7 +7,7 @@ const router = Router();
 // Basic analytics summary derived from ActivityLog — filtered by shop
 router.get("/", async (req, res) => {
   try {
-    const { shop } = req.query;
+    const shop = req.shopifyShop || req.query.shop;
     console.log(`[Analytics] Fetching for shop: ${shop}`);
     const now = new Date();
     const thirtyDaysAgo = new Date();

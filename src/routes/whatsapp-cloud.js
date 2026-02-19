@@ -6,7 +6,12 @@ import { ActivityLog } from "../models/ActivityLog.js";
 const router = Router();
 
 // Helper to get shop domain
-const getShopDomain = (req) => req.query.shop || req.headers["x-shop-domain"];
+const getShopDomain = (req) => {
+    if (req.shopifyShop) return req.shopifyShop;
+    const shop = req.query.shop || req.headers["x-shop-domain"];
+    if (!shop) return null;
+    return shop.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+};
 
 // POST /api/whatsapp-cloud/send - Send text message
 router.post("/send", async (req, res) => {

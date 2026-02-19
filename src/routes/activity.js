@@ -9,7 +9,7 @@ const router = Router();
 // GET /activity — Returns recent activity logs filtered by shop
 router.get("/", async (req, res) => {
   try {
-    const { shop } = req.query;
+    const shop = req.shopifyShop || req.query.shop;
     console.log(`[Activity] Fetching for shop: ${shop}`);
 
     if (!shop) {

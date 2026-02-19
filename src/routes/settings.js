@@ -6,6 +6,7 @@ const router = Router();
 
 // Helper to resolve merchant by shop domain (for now via query param)
 const getShopDomain = (req) => {
+  if (req.shopifyShop) return req.shopifyShop;
   const shop = req.query.shop || req.headers["x-shop-domain"];
   if (!shop) return null;
   return shop.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");

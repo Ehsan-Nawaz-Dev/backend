@@ -4,7 +4,12 @@ import { Template } from "../models/Template.js";
 
 const router = Router();
 
-const getShopDomain = (req) => req.query.shop || req.headers["x-shop-domain"];
+const getShopDomain = (req) => {
+  if (req.shopifyShop) return req.shopifyShop;
+  const shop = req.query.shop || req.headers["x-shop-domain"];
+  if (!shop) return null;
+  return shop.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+};
 
 // GET /api/templates
 router.get("/", async (req, res) => {

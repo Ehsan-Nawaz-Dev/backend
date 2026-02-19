@@ -6,7 +6,7 @@ const router = Router();
 // POST /api/trial/activate
 // Activates the 10-message trial using user details
 router.post("/activate", async (req, res) => {
-    const { shop } = req.query;
+    const shop = req.shopifyShop || req.query.shop;
     const { name, email, phone } = req.body;
 
     if (!shop) {
@@ -59,7 +59,7 @@ router.post("/activate", async (req, res) => {
 // GET /api/trial/status
 // Checks the current trial status
 router.get("/status", async (req, res) => {
-    const { shop } = req.query;
+    const shop = req.shopifyShop || req.query.shop;
 
     if (!shop) {
         return res.status(400).json({ error: "Shop domain is required" });

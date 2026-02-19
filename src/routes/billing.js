@@ -12,7 +12,7 @@ const API_VERSION = "2025-01";
 // POST /billing/create — Create a subscription or activate free plan
 // ============================================================
 router.post('/create', async (req, res) => {
-    const { shop } = req.query;
+    const shop = req.shopifyShop || req.query.shop;
     const { plan: planId } = req.body;
     console.log(`[Billing] Creating charge for shop: ${shop}, plan: ${planId}`);
 
@@ -161,7 +161,8 @@ router.post('/create', async (req, res) => {
 // GET /billing/confirm — Return URL after Shopify approval
 // ============================================================
 router.get('/confirm', async (req, res) => {
-    const { shop, plan, charge_id } = req.query;
+    const shop = req.shopifyShop || req.query.shop;
+    const { plan, charge_id } = req.query;
     console.log(`[Billing] Confirm callback for shop: ${shop}, plan: ${plan}, charge_id: ${charge_id || 'N/A'}`);
 
     try {
@@ -248,7 +249,7 @@ router.get('/confirm', async (req, res) => {
 // GET /billing/status — Check current subscription status
 // ============================================================
 router.get('/status', async (req, res) => {
-    const { shop } = req.query;
+    const shop = req.shopifyShop || req.query.shop;
     try {
         const merchant = await Merchant.findOne({
             shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
