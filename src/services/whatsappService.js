@@ -284,10 +284,12 @@ class WhatsAppService {
     }
 
     async initializeClient(shopDomain) {
-        // If already connected with a live socket, don't create a new one (prevents conflict)
+        // If already connected with a LIVE socket, don't create a new one (prevents conflict)
+        // CRITICAL: We check ws.readyState because sock.user persists even after disconnection
         const existingSock = this.sockets.get(shopDomain);
-        if (existingSock && existingSock.user) {
-            console.log(`[WhatsApp] Already connected for ${shopDomain} (phone: ${existingSock.user.id}). Skipping re-init.`);
+        const isSocketAlive = existingSock && existingSock.user && existingSock.ws?.readyState === 1; // 1 = OPEN
+        if (isSocketAlive) {
+            console.log(`[WhatsApp] Already connected for ${shopDomain} (phone: ${existingSock.user.id}, ws: OPEN). Skipping re-init.`);
             return { success: true, status: "already_connected" };
         }
 
@@ -1248,6 +1250,14 @@ class WhatsAppService {
                     }
 
                     console.log(`[WhatsApp] Forced Re-init for ${shopDomain} (Retry ${retryCount + 1}/2)`);
+                    // Clear stale socket before re-init
+                    const staleSock = this.sockets.get(shopDomain);
+                    if (staleSock) {
+                        staleSock.ev?.removeAllListeners();
+                        try { staleSock.end(); } catch (e) { /* ignore */ }
+                        this.sockets.delete(shopDomain);
+                    }
+                    this.pendingInits.delete(shopDomain);
                     await this.initializeClient(shopDomain);
                     await WhatsAppService.delay(10000);
                     return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
@@ -1289,7 +1299,15 @@ class WhatsAppService {
                 const isConnectionError = errorMsg.includes('Connection Closed') || statusCode === 428 || innerError.isBoom;
 
                 if (retryCount < 2 && isConnectionError) {
-                    console.warn(`[WhatsApp] Connection error (428). Force re-init and retry ${retryCount + 1}/2...`);
+                    console.warn(`[WhatsApp] Connection error (428). Clearing stale socket and retrying ${retryCount + 1}/2...`);
+                    // Clear stale socket before re-init
+                    const staleSock = this.sockets.get(shopDomain);
+                    if (staleSock) {
+                        staleSock.ev?.removeAllListeners();
+                        try { staleSock.end(); } catch (e) { /* ignore */ }
+                        this.sockets.delete(shopDomain);
+                    }
+                    this.pendingInits.delete(shopDomain);
                     await this.initializeClient(shopDomain);
                     await WhatsAppService.delay(10000);
                     return this.sendMessage(shopDomain, phoneNumber, message, retryCount + 1);
@@ -1373,9 +1391,19 @@ class WhatsAppService {
 
             // Retry on connection errors
             if (retryCount < 1 && isConnectionError) {
-                console.log(`[WhatsApp] Connection error for poll (${errorMsg}), attempting re-init and retry...`);
+                console.log(`[WhatsApp] Connection error for poll (${errorMsg}), clearing stale socket and re-initializing...`);
+
+                // IMPORTANT: Clear the stale/dead socket so initializeClient creates a fresh one
+                const staleSock = this.sockets.get(shopDomain);
+                if (staleSock) {
+                    staleSock.ev?.removeAllListeners();
+                    try { staleSock.end(); } catch (e) { /* ignore */ }
+                    this.sockets.delete(shopDomain);
+                }
+                this.pendingInits.delete(shopDomain); // Clear any pending init flag too
+
                 await this.initializeClient(shopDomain);
-                await WhatsAppService.delay(5000);
+                await WhatsAppService.delay(8000); // Wait longer for fresh connection to stabilize
                 return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, retryCount + 1);
             }
 
