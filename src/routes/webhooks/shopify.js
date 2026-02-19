@@ -669,6 +669,45 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             }
         );
         console.log(`[ShopifyWebhook] App UNINSTALLED for ${shopDomain}. Merchant marked inactive.`);
+    } else if (topic === "app_subscriptions/update") {
+        const { app_subscription } = req.body;
+        console.log(`[ShopifyWebhook] Subscription update for ${shopDomain}:`, app_subscription?.status);
+
+        if (app_subscription && app_subscription.status === 'ACTIVE') {
+            // Find the handle (id) from the plan name or via a more robust mapping
+            // In Managed Billing, the plans names are usually what we set in the dashboard.
+            // We'll try to match the handle from the subscription name or metadata if available.
+            // Shopify doesn't always send the 'handle' directly in the webhook payload, 
+            // but the name usually contains it (e.g., "Starter Plan").
+
+            const subscriptionName = app_subscription.name.toLowerCase();
+            let matchedPlanId = 'free';
+            if (subscriptionName.includes('starter')) matchedPlanId = 'starter';
+            else if (subscriptionName.includes('growth')) matchedPlanId = 'growth';
+            else if (subscriptionName.includes('pro')) matchedPlanId = 'pro';
+            else if (subscriptionName.includes('trial')) matchedPlanId = 'trial';
+
+            console.log(`[ShopifyWebhook] Activating plan '${matchedPlanId}' for ${shopDomain}`);
+
+            await Merchant.findOneAndUpdate(
+                { shopDomain },
+                {
+                    plan: matchedPlanId,
+                    billingStatus: 'active',
+                    shopifySubscriptionId: app_subscription.admin_graphql_api_id
+                }
+            );
+        } else if (app_subscription && (app_subscription.status === 'CANCELLED' || app_subscription.status === 'DECLINED')) {
+            console.log(`[ShopifyWebhook] Subscription ${app_subscription.status} for ${shopDomain}. Reverting to free.`);
+            await Merchant.findOneAndUpdate(
+                { shopDomain },
+                {
+                    plan: 'free',
+                    billingStatus: 'none',
+                    shopifySubscriptionId: null
+                }
+            );
+        }
     } else if (topic === "checkouts/create") {
         console.log(`[ShopifyWebhook] Checkout created for ${shopDomain}.`);
         // Optional: Trigger abandoned cart logic here or via checkouts/abandoned
