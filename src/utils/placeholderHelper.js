@@ -55,18 +55,33 @@ export const replacePlaceholders = (template, data) => {
     console.log(`[PlaceholderHelper] DEBUG - Price extracted: ${currency} ${price} (raw: ${rawPrice})`);
     const customerPhone = order.customer?.phone || order.shipping_address?.phone || order.billing_address?.phone || order.phone || "";
 
+    // Extract customer name: prioritize shipping/billing (checkout entry) over account name
+    const getCustomerName = () => {
+        if (order.shipping_address?.first_name) {
+            return `${order.shipping_address.first_name} ${order.shipping_address.last_name || ""}`.trim();
+        }
+        if (order.billing_address?.first_name) {
+            return `${order.billing_address.first_name} ${order.billing_address.last_name || ""}`.trim();
+        }
+        if (order.customer?.first_name) {
+            return `${order.customer.first_name} ${order.customer.last_name || ""}`.trim();
+        }
+        return order.shipping_address?.name || order.billing_address?.name || "Customer";
+    };
+    const resolvedCustomerName = getCustomerName();
+
     console.log(`[PlaceholderHelper] Extracted values:`, {
         address,
         city,
         price,
         currency,
-        customerName: order.customer?.first_name ? `${order.customer.first_name} ${order.customer.last_name || ""}`.trim() : (order.shipping_address?.name || order.billing_address?.name || "Customer")
+        customerName: resolvedCustomerName
     });
 
     const placeholders = {
         "{{store_name}}": merchant?.storeName || merchant?.shopDomain || "",
         "{{order_number}}": order.name || order.order_number || `#${order.id || order.order_id}`,
-        "{{customer_name}}": (order.customer?.first_name ? `${order.customer.first_name} ${order.customer.last_name || ""}`.trim() : (order.shipping_address?.name || order.billing_address?.name || "Customer")),
+        "{{customer_name}}": resolvedCustomerName,
         "{{order_id}}": (order.id || order.order_id)?.toString() || "",
 
         // Price placeholders

@@ -23,9 +23,10 @@ const getCustomerData = (order) => {
         order.billing_address?.phone ||
         order.phone;
 
-    // Try these 2 places for name
-    const first = order.customer?.first_name || order.shipping_address?.first_name || "Customer";
-    const last = order.customer?.last_name || "";
+    // Prioritize shipping/billing address name (entered at checkout) over customer account name
+    // Shopify's order.customer has the ACCOUNT holder name, not necessarily the buyer's name
+    const first = order.shipping_address?.first_name || order.billing_address?.first_name || order.customer?.first_name || "Customer";
+    const last = order.shipping_address?.last_name || order.billing_address?.last_name || order.customer?.last_name || "";
 
     return {
         phone: phone ? phone.replace(/\D/g, '') : null,
