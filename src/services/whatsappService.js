@@ -33,6 +33,8 @@ class WhatsAppService {
         this.pendingInits = new Set(); // shopDomain -> is initializing
         this.disconnecting = new Set(); // shopDomain -> is actively disconnecting
         this.reconnectTimeouts = new Map(); // shopDomain -> timeout ID
+        this.connectionAlive = new Map(); // shopDomain -> boolean (true = connection is open)
+        this.connectionOpenedAt = new Map(); // shopDomain -> timestamp (when connection opened)
     }
 
     // Store a message in the in-memory cache (for poll vote decryption)
@@ -284,12 +286,10 @@ class WhatsAppService {
     }
 
     async initializeClient(shopDomain) {
-        // If already connected with a LIVE socket, don't create a new one (prevents conflict)
-        // CRITICAL: We check ws.readyState because sock.user persists even after disconnection
-        const existingSock = this.sockets.get(shopDomain);
-        const isSocketAlive = existingSock && existingSock.user && existingSock.ws?.readyState === 1; // 1 = OPEN
-        if (isSocketAlive) {
-            console.log(`[WhatsApp] Already connected for ${shopDomain} (phone: ${existingSock.user.id}, ws: OPEN). Skipping re-init.`);
+        // If connection is genuinely alive, don't create a new one (prevents conflict)
+        // We use our own tracker because Baileys doesn't expose ws.readyState reliably
+        if (this.connectionAlive.get(shopDomain) && this.sockets.get(shopDomain)?.user) {
+            console.log(`[WhatsApp] Already connected for ${shopDomain} (alive since ${new Date(this.connectionOpenedAt.get(shopDomain)).toISOString()}). Skipping re-init.`);
             return { success: true, status: "already_connected" };
         }
 
@@ -395,6 +395,7 @@ class WhatsAppService {
                     const errorMessage = lastDisconnect?.error?.message || "Unknown error";
 
                     console.log(`Connection CLOSED for ${shopDomain}. Status: ${statusCode}. Error: ${errorMessage}`);
+                    this.connectionAlive.set(shopDomain, false); // Mark connection as dead
 
                     // Update session status
                     await WhatsAppSession.findOneAndUpdate(
@@ -443,7 +444,19 @@ class WhatsAppService {
                     }
                 } else if (connection === "open") {
                     console.log(`WhatsApp socket ready for ${shopDomain}`);
-                    this.conflictCounts.delete(shopDomain); // Reset on success
+                    this.connectionAlive.set(shopDomain, true);
+                    this.connectionOpenedAt.set(shopDomain, Date.now());
+
+                    // DON'T reset conflict counter immediately — only reset after 30s stability
+                    // This prevents infinite conflict loops where brief opens keep resetting the counter
+                    setTimeout(() => {
+                        if (this.connectionAlive.get(shopDomain)) {
+                            // Connection survived 30s — it's genuinely stable
+                            this.conflictCounts.delete(shopDomain);
+                            console.log(`[WhatsApp] Connection stable for 30s for ${shopDomain}. Conflict counter reset.`);
+                        }
+                    }, 30000);
+
                     const user = sock.user.id.split(":")[0];
 
                     // 1. Update WhatsApp Session
@@ -1257,6 +1270,7 @@ class WhatsAppService {
                         try { staleSock.end(); } catch (e) { /* ignore */ }
                         this.sockets.delete(shopDomain);
                     }
+                    this.connectionAlive.set(shopDomain, false);
                     this.pendingInits.delete(shopDomain);
                     await this.initializeClient(shopDomain);
                     await WhatsAppService.delay(10000);
@@ -1307,6 +1321,7 @@ class WhatsAppService {
                         try { staleSock.end(); } catch (e) { /* ignore */ }
                         this.sockets.delete(shopDomain);
                     }
+                    this.connectionAlive.set(shopDomain, false);
                     this.pendingInits.delete(shopDomain);
                     await this.initializeClient(shopDomain);
                     await WhatsAppService.delay(10000);
@@ -1400,6 +1415,7 @@ class WhatsAppService {
                     try { staleSock.end(); } catch (e) { /* ignore */ }
                     this.sockets.delete(shopDomain);
                 }
+                this.connectionAlive.set(shopDomain, false);
                 this.pendingInits.delete(shopDomain); // Clear any pending init flag too
 
                 await this.initializeClient(shopDomain);
