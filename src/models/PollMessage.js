@@ -8,6 +8,8 @@ const PollMessageSchema = new mongoose.Schema(
         messageData: { type: String, required: true },
         // Customer phone for easier lookup
         customerPhone: { type: String },
+        // Link to specific Order ID to handle concurrency/multiple orders correctly
+        orderId: { type: String, index: true },
     },
     { timestamps: true }
 );

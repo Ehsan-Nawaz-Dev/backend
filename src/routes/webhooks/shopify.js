@@ -401,7 +401,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     let result;
                     console.log(`[ShopifyWebhook] Sending WhatsApp to ${customerPhoneFormatted} via ${updatedMerchant.whatsappProvider}...`);
                     if (customerTemplate?.isPoll && customerTemplate?.pollOptions?.length > 0) {
-                        result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, customerMsg, customerTemplate.pollOptions);
+                        result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, customerMsg, customerTemplate.pollOptions, orderId);
                     } else {
                         result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, customerMsg);
                     }
@@ -515,7 +515,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 cancelMsg = cancelMsg.replace(/{{customer_name}}/g, customerName);
 
                 if (cancelTemplate.isPoll && cancelTemplate.pollOptions?.length > 0) {
-                    await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions);
+                    await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions, orderId);
                 } else {
                     await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
                 }
@@ -559,7 +559,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
                     let result;
                     if (abandonedTemplate.isPoll && abandonedTemplate.pollOptions?.length > 0) {
-                        result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, abandonedMsg, abandonedTemplate.pollOptions);
+                        result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, abandonedMsg, abandonedTemplate.pollOptions, orderId);
                     } else {
                         result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, abandonedMsg);
                     }
@@ -612,7 +612,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 fulfillmentMsg = replacePlaceholders(fulfillmentMsg, { order, merchant });
                 fulfillmentMsg = fulfillmentMsg.replace(/{{customer_name}}/g, customerName);
 
-                const result = template.isPoll ? await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, fulfillmentMsg, template.pollOptions) : await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, fulfillmentMsg);
+                const result = template.isPoll ? await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, fulfillmentMsg, template.pollOptions, orderId) : await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, fulfillmentMsg);
 
                 if (result?.success) {
                     await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });

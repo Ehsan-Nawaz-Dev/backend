@@ -52,15 +52,19 @@ class WhatsAppService {
     }
 
     // Persist a poll creation message to MongoDB (survives server restarts)
-    async storePollMessage(shopDomain, msg, customerPhone) {
+    async storePollMessage(shopDomain, msg, customerPhone, orderId = null) {
         try {
-            // Store in memory too
+            // Store in memory too (full message object for decryption)
             this.storeMessage(shopDomain, msg);
             // Persist to MongoDB using BufferJSON to handle Buffers
             const messageData = JSON.stringify(msg, BufferJSON.replacer);
+
+            const updateData = { shopDomain, messageKeyId: msg.key.id, messageData, customerPhone };
+            if (orderId) updateData.orderId = String(orderId);
+
             await PollMessage.findOneAndUpdate(
                 { shopDomain, messageKeyId: msg.key.id },
-                { shopDomain, messageKeyId: msg.key.id, messageData, customerPhone },
+                updateData,
                 { upsert: true }
             );
             console.log(`[PollStore] Saved poll message ${msg.key.id} to MongoDB for ${shopDomain}`);
@@ -554,63 +558,79 @@ class WhatsAppService {
                         const isLidFormat = fullJid?.includes('@lid');
                         let log = null;
 
-                        if (isLidFormat && isPollUpdate) {
-                            // CRITICAL FIX: Match poll vote to the CORRECT customer's order
-                            // LID JIDs can't be mapped to phone numbers directly, but we can
-                            // identify the customer from the poll creation message key
+                        // 1. POLLING LOGIC: Try to match by Order ID first (Handles Concurrency)
+                        if (isPollUpdate) {
                             const pollCreationKey = msg.message.pollUpdateMessage?.pollCreationMessageKey;
-                            let customerPhoneFromPoll = null;
-
-                            // Method 1: Get phone from pollCreationKey.remoteJid (e.g. "923182668034@s.whatsapp.net")
-                            if (pollCreationKey?.remoteJid && !pollCreationKey.remoteJid.includes('@lid')) {
-                                customerPhoneFromPoll = pollCreationKey.remoteJid.split("@")[0].split(":")[0].replace(/\D/g, "");
-                                console.log(`[Interaction] LID poll: got customer phone from remoteJid: ${customerPhoneFromPoll}`);
-                            }
-
-                            // Method 2: Look up stored PollMessage in MongoDB by message ID
-                            if (!customerPhoneFromPoll && pollCreationKey?.id) {
+                            if (pollCreationKey?.id) {
                                 try {
                                     const storedPoll = await PollMessage.findOne({ shopDomain, messageKeyId: pollCreationKey.id });
-                                    if (storedPoll?.customerPhone) {
-                                        customerPhoneFromPoll = storedPoll.customerPhone.replace(/\D/g, "");
-                                        console.log(`[Interaction] LID poll: got customer phone from PollMessage DB: ${customerPhoneFromPoll}`);
+                                    if (storedPoll?.orderId) {
+                                        console.log(`[Interaction] Poll linked to Order ID: ${storedPoll.orderId}`);
+                                        log = await ActivityLog.findOne({
+                                            merchant: merchant._id,
+                                            orderId: storedPoll.orderId,
+                                            type: { $in: ["pending", "pre-cancel", "feedback-pending"] }
+                                        });
+                                        if (log) console.log(`[Interaction] ✅ MATCHED Log by Order ID: ${storedPoll.orderId}`);
                                     }
-                                } catch (pollLookupErr) {
-                                    console.warn(`[Interaction] LID poll: PollMessage lookup error:`, pollLookupErr.message);
+                                } catch (err) {
+                                    console.warn(`[Interaction] Poll lookup error:`, err.message);
                                 }
                             }
+                        }
 
-                            // Use customer phone to find the EXACT matching ActivityLog
-                            if (customerPhoneFromPoll) {
-                                const phoneSuffix = customerPhoneFromPoll.slice(-9);
-                                log = await ActivityLog.findOne({
-                                    merchant: merchant._id,
-                                    customerPhone: new RegExp(phoneSuffix + "$"),
-                                    type: { $in: ["pending", "pre-cancel", "feedback-pending"] },
-                                    createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) }
-                                }).sort({ createdAt: -1 });
-                                console.log(`[Interaction] LID poll: matched by phone ${customerPhoneFromPoll} → log found: ${!!log}, orderId: ${log?.orderId}, type: ${log?.type}`);
-                            }
+                        // 2. FALLBACK: Phone-based lookup (Legacy Polls, Text messages, or Failed ID link)
+                        if (!log) {
+                            let targetLog = null;
+                            if (isLidFormat && isPollUpdate) {
+                                // LID Logic: Try to extract phone from RemoteJid or Stored Poll
+                                const pollCreationKey = msg.message.pollUpdateMessage?.pollCreationMessageKey;
+                                let customerPhoneFromPoll = null;
 
-                            // FALLBACK: If we still couldn't find a log (shouldn't happen normally)
-                            if (!log) {
-                                console.warn(`[Interaction] LID poll: Could not match by customer phone, falling back to merchant-wide lookup`);
-                                log = await ActivityLog.findOne({
-                                    merchant: merchant._id,
-                                    type: { $in: ["pending", "pre-cancel", "feedback-pending"] },
-                                    createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) }
-                                }).sort({ createdAt: -1 });
-                                console.log(`[Interaction] LID poll: FALLBACK found log: ${!!log}, orderId: ${log?.orderId}, type: ${log?.type}`);
+                                if (pollCreationKey?.remoteJid && !pollCreationKey.remoteJid.includes('@lid')) {
+                                    customerPhoneFromPoll = pollCreationKey.remoteJid.split("@")[0].split(":")[0].replace(/\D/g, "");
+                                }
+
+                                if (!customerPhoneFromPoll && pollCreationKey?.id) {
+                                    try {
+                                        const storedPoll = await PollMessage.findOne({ shopDomain, messageKeyId: pollCreationKey.id });
+                                        if (storedPoll?.customerPhone) {
+                                            customerPhoneFromPoll = storedPoll.customerPhone.replace(/\D/g, "");
+                                        }
+                                    } catch (e) { }
+                                }
+
+                                if (customerPhoneFromPoll) {
+                                    const phoneSuffix = customerPhoneFromPoll.slice(-9);
+                                    targetLog = await ActivityLog.findOne({
+                                        merchant: merchant._id,
+                                        customerPhone: new RegExp(phoneSuffix + "$"),
+                                        type: { $in: ["pending", "pre-cancel", "feedback-pending"] },
+                                        createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) }
+                                    }).sort({ createdAt: -1 });
+                                }
+
+                                // Final Fallback for LID: Merchant-wide latest pending (Risky but necessary for orphaned LIDs)
+                                if (!targetLog) {
+                                    console.warn(`[Interaction] LID poll fallback: Merchant-wide lookup`);
+                                    targetLog = await ActivityLog.findOne({
+                                        merchant: merchant._id,
+                                        type: { $in: ["pending", "pre-cancel", "feedback-pending"] },
+                                        createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) }
+                                    }).sort({ createdAt: -1 });
+                                }
+                            } else {
+                                // Standard Logic: Use Sender's Phone Number
+                                const phoneSuffix = fromCleaner.slice(-9);
+                                if (phoneSuffix) {
+                                    targetLog = await ActivityLog.findOne({
+                                        merchant: merchant._id,
+                                        customerPhone: new RegExp(phoneSuffix + "$"),
+                                        type: { $in: ["pending", "pre-cancel", "feedback-pending"] }
+                                    }).sort({ createdAt: -1 });
+                                }
                             }
-                        } else {
-                            const phoneSuffix = fromCleaner.slice(-9);
-                            if (phoneSuffix) {
-                                log = await ActivityLog.findOne({
-                                    merchant: merchant._id,
-                                    customerPhone: new RegExp(phoneSuffix + "$"),
-                                    type: { $in: ["pending", "pre-cancel", "feedback-pending"] }
-                                }).sort({ createdAt: -1 });
-                            }
+                            log = targetLog;
                         }
 
                         let activityStatus = null;
@@ -1384,9 +1404,9 @@ class WhatsAppService {
         }
     }
 
-    async sendPoll(shopDomain, phoneNumber, pollName, pollOptions, retryCount = 0) {
+    async sendPoll(shopDomain, phoneNumber, pollName, pollOptions, orderId = null, retryCount = 0) {
         try {
-            console.log(`[WhatsApp] sendPoll called for ${shopDomain} to ${phoneNumber}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
+            console.log(`[WhatsApp] sendPoll called for ${shopDomain} to ${phoneNumber}${retryCount > 0 ? ` (retry ${retryCount})` : ''} (Order: ${orderId || 'none'})`);
 
             // Protection: Check if merchant is blocked
             const merchant = await Merchant.findOne({ shopDomain });
@@ -1403,7 +1423,7 @@ class WhatsAppService {
                     console.log(`[WhatsApp] No socket for poll, attempting to reconnect...`);
                     await this.initializeClient(shopDomain);
                     await WhatsAppService.delay(5000);
-                    return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, retryCount + 1);
+                    return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, orderId, retryCount + 1);
                 }
                 console.error(`[WhatsApp] No socket found for ${shopDomain}. Available sockets: ${Array.from(this.sockets.keys()).join(", ") || "none"}`);
                 return { success: false, error: "WhatsApp not connected - no socket" };
@@ -1414,7 +1434,7 @@ class WhatsAppService {
                 if (retryCount < 1) {
                     console.log(`[WhatsApp] Socket exists but not authenticated for poll, waiting...`);
                     await WhatsAppService.delay(5000);
-                    return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, retryCount + 1);
+                    return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, orderId, retryCount + 1);
                 }
                 console.error(`[WhatsApp] Socket exists but no user for ${shopDomain}. Connection might be initializing.`);
                 return { success: false, error: "WhatsApp not connected - not authenticated" };
@@ -1438,7 +1458,7 @@ class WhatsAppService {
             });
             // Store the sent poll message so we can decrypt vote responses later
             if (sentMsg) {
-                await this.storePollMessage(shopDomain, sentMsg, formattedNumber);
+                await this.storePollMessage(shopDomain, sentMsg, formattedNumber, orderId);
                 console.log(`[WhatsApp] Poll sent and stored in MongoDB (key: ${sentMsg.key?.id}) for vote decryption`);
             }
             console.log(`[WhatsApp] Poll sent successfully to ${formattedNumber}`);
@@ -1469,7 +1489,7 @@ class WhatsAppService {
 
                 await this.initializeClient(shopDomain);
                 await WhatsAppService.delay(8000); // Wait longer for fresh connection to stabilize
-                return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, retryCount + 1);
+                return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, orderId, retryCount + 1);
             }
 
             return { success: false, error: errorMsg || error.message };
