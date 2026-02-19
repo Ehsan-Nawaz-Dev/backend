@@ -356,8 +356,10 @@ class WhatsAppService {
                 },
                 logger,
                 browser: ["Whatomatic Backend", "Chrome", "1.1.0"],
-                connectTimeoutMs: 20000, // 20s connection timeout (faster failure detection)
-                qrTimeout: 40000, // 40s QR code timeout
+                connectTimeoutMs: 20000,
+                qrTimeout: 40000,
+                syncFullHistory: false, // Don't sync full history — reduces conflicts and speeds up connection
+                markOnlineOnConnect: false, // Don't mark online immediately — reduces presence conflicts
                 getMessage: async (key) => {
                     // Required by Baileys for poll vote decryption
                     const fullMsg = await this.getMessageFromStore(shopDomain, key);
@@ -408,25 +410,30 @@ class WhatsAppService {
                     const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
                     if (isLoggedOut || (isConflict && statusCode === 401)) {
-                        console.log(`Permanent disconnect (Logout/Conflict) for ${shopDomain}. Stopping auto-reconnect.`);
+                        console.log(`Permanent disconnect (Logout/401 Conflict) for ${shopDomain}. Stopping auto-reconnect.`);
                         await WhatsAppSession.findOneAndUpdate({ shopDomain }, { status: "disconnected", isConnected: false });
                     } else if (isConflict) {
+                        // CONFLICT STRATEGY: Don't retry aggressively — it makes things worse.
+                        // "conflict: replaced" means another client opened a connection.
+                        // Retrying immediately just creates ANOTHER conflict.
+                        // Instead: wait a LONG time, then try once. If it fails again, stop.
                         const count = (this.conflictCounts.get(shopDomain) || 0) + 1;
                         this.conflictCounts.set(shopDomain, count);
 
-                        if (count > 5) {
-                            console.error(`🚨 EXCEEDED CONFLICT RETRIES (${count}) for ${shopDomain}. Stopping to avoid BAN.`);
+                        if (count > 3) {
+                            console.error(`🚨 EXCEEDED CONFLICT RETRIES (${count}) for ${shopDomain}. Stopping.`);
+                            console.error(`🚨 Check: Is WhatsApp Web open in a browser? Is another server running?`);
                             await WhatsAppSession.findOneAndUpdate(
                                 { shopDomain },
-                                { status: "error", isConnected: false, errorMessage: "Persistent Connection Conflict - Is the same account used elsewhere?" }
+                                { status: "error", isConnected: false, errorMessage: "Connection conflict - close WhatsApp Web in any browser and reconnect from dashboard" }
                             );
                             return;
                         }
 
-                        // Faster backoff retry: 5s, 10s, 15s... + small jitter (conflict is usually transient)
-                        const jitter = Math.floor(Math.random() * 3000);
-                        const delay = (count * 5000) + jitter;
+                        // LONG backoff: 60s, 120s, 180s — give the other client time to disconnect
+                        const delay = count * 60000;
                         console.log(`Conflict #${count} detected for ${shopDomain}. Waiting ${delay / 1000} seconds before retry...`);
+                        console.log(`⚠️ If this keeps happening, close WhatsApp Web in your browser!`);
                         const timeout = setTimeout(() => this.initializeClient(shopDomain), delay);
                         this.reconnectTimeouts.set(shopDomain, timeout);
                     } else {
@@ -447,15 +454,15 @@ class WhatsAppService {
                     this.connectionAlive.set(shopDomain, true);
                     this.connectionOpenedAt.set(shopDomain, Date.now());
 
-                    // DON'T reset conflict counter immediately — only reset after 30s stability
+                    // DON'T reset conflict counter immediately — only reset after 60s stability
                     // This prevents infinite conflict loops where brief opens keep resetting the counter
                     setTimeout(() => {
                         if (this.connectionAlive.get(shopDomain)) {
-                            // Connection survived 30s — it's genuinely stable
+                            // Connection survived 60s — it's genuinely stable
                             this.conflictCounts.delete(shopDomain);
-                            console.log(`[WhatsApp] Connection stable for 30s for ${shopDomain}. Conflict counter reset.`);
+                            console.log(`[WhatsApp] Connection stable for 60s for ${shopDomain}. Conflict counter reset.`);
                         }
-                    }, 30000);
+                    }, 60000);
 
                     const user = sock.user.id.split(":")[0];
 
