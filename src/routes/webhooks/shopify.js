@@ -200,7 +200,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 const existing = await ActivityLog.findOne({
                     merchant: merchantId,
                     orderId: orderId,
-                    type: { $in: ['pending', 'confirmed', 'cancelled'] },
+                    type: { $in: ['pending', 'confirmed', 'cancelled', 'pre-cancel', 'failed'] },
                     createdAt: { $gt: fifteenMinutesAgo }
                 });
                 return !!existing;
@@ -223,24 +223,62 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         }
     };
 
-    if (topic === "orders/create" || (topic === "orders/updated" && order.financial_status === "pending")) {
+    // ONLY handle orders/create — NOT orders/updated with pending status
+    // Shopify fires BOTH webhooks simultaneously for new orders, causing duplicate messages
+    if (topic === "orders/create") {
         // 1. Create the Activity Log as 'pending'
         console.log(`[ShopifyWebhook] Processing ${topic} for ${orderNumber} (ID: ${orderId})`);
 
-        // Idempotency Check
+        // Idempotency Check (standard query)
         if (orderId && await isDuplicateWebhook(merchant._id, orderId, topic)) {
             console.log(`[ShopifyWebhook] Duplicate orders/create for ${orderId}. Skipping.`);
             return res.status(200).send('ok');
         }
 
-        const activity = await ActivityLog.create({
-            merchant: merchant?._id,
-            type: 'pending',
+        // ATOMIC LOCK: Use MongoDB findOneAndUpdate with upsert to prevent race conditions
+        // If two webhooks arrive simultaneously, only one will successfully create the lock
+        try {
+            const lockResult = await ActivityLog.findOneAndUpdate(
+                {
+                    merchant: merchant._id,
+                    orderId: orderId,
+                    createdAt: { $gt: new Date(Date.now() - 15 * 60 * 1000) }
+                },
+                {
+                    $setOnInsert: {
+                        merchant: merchant._id,
+                        type: 'pending',
+                        orderId: orderId,
+                        message: 'Processing Order Notification...',
+                        customerName: customerName,
+                        customerPhone: customerPhoneFormatted,
+                        rawPayload: order
+                    }
+                },
+                { upsert: true, new: false } // Returns null if it was a fresh insert (no prior doc)
+            );
+
+            if (lockResult) {
+                // Document already existed — another webhook already claimed this order
+                console.log(`[ShopifyWebhook] ATOMIC LOCK: Order ${orderId} already being processed. Skipping duplicate.`);
+                return res.status(200).send('ok');
+            }
+            console.log(`[ShopifyWebhook] ATOMIC LOCK: Acquired lock for order ${orderId}`);
+        } catch (lockErr) {
+            // E11000 duplicate key error means another webhook won the race — skip
+            if (lockErr.code === 11000) {
+                console.log(`[ShopifyWebhook] ATOMIC LOCK: Duplicate key for order ${orderId}. Skipping.`);
+                return res.status(200).send('ok');
+            }
+            console.error(`[ShopifyWebhook] Lock error:`, lockErr.message);
+        }
+
+        // Fetch the activity log that was just created by the atomic lock above
+        const activity = await ActivityLog.findOne({
+            merchant: merchant._id,
             orderId: orderId,
-            message: 'Processing Order Notification...',
-            customerName: customerName,
-            customerPhone: customerPhoneFormatted,
-            rawPayload: order
+            type: 'pending',
+            createdAt: { $gt: new Date(Date.now() - 15 * 60 * 1000) }
         });
 
         // NEW: Save Customer to Contacts

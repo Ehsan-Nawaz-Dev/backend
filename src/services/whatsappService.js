@@ -284,6 +284,13 @@ class WhatsAppService {
     }
 
     async initializeClient(shopDomain) {
+        // If already connected with a live socket, don't create a new one (prevents conflict)
+        const existingSock = this.sockets.get(shopDomain);
+        if (existingSock && existingSock.user) {
+            console.log(`[WhatsApp] Already connected for ${shopDomain} (phone: ${existingSock.user.id}). Skipping re-init.`);
+            return { success: true, status: "already_connected" };
+        }
+
         if (this.pendingInits.has(shopDomain)) {
             console.log(`[WhatsApp] Skip initialize for ${shopDomain} - already in progress.`);
             return { success: true, status: "pending" };
@@ -404,8 +411,8 @@ class WhatsAppService {
                         const count = (this.conflictCounts.get(shopDomain) || 0) + 1;
                         this.conflictCounts.set(shopDomain, count);
 
-                        if (count > 3) {
-                            console.error(`🚨 EXCEEDED CONFLICT RETRIES for ${shopDomain}. Stopping to avoid BAN.`);
+                        if (count > 5) {
+                            console.error(`🚨 EXCEEDED CONFLICT RETRIES (${count}) for ${shopDomain}. Stopping to avoid BAN.`);
                             await WhatsAppSession.findOneAndUpdate(
                                 { shopDomain },
                                 { status: "error", isConnected: false, errorMessage: "Persistent Connection Conflict - Is the same account used elsewhere?" }
@@ -413,9 +420,9 @@ class WhatsAppService {
                             return;
                         }
 
-                        // Backoff retry: 30s, 60s, 90s... + random jitter
-                        const jitter = Math.floor(Math.random() * 10000);
-                        const delay = (count * 30000) + jitter;
+                        // Faster backoff retry: 5s, 10s, 15s... + small jitter (conflict is usually transient)
+                        const jitter = Math.floor(Math.random() * 3000);
+                        const delay = (count * 5000) + jitter;
                         console.log(`Conflict #${count} detected for ${shopDomain}. Waiting ${delay / 1000} seconds before retry...`);
                         const timeout = setTimeout(() => this.initializeClient(shopDomain), delay);
                         this.reconnectTimeouts.set(shopDomain, timeout);
