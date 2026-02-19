@@ -26,8 +26,10 @@ router.post('/create', async (req, res) => {
         });
 
         if (!merchant) {
-            console.error(`[Billing] Merchant ${shop} not found in database.`);
-            return res.status(404).json({ message: 'Merchant not found. Please reinstall the app.' });
+            console.warn(`[Billing] Merchant ${shop} not found in database. Triggering automatic re-auth setup...`);
+            // Return OAuth URL as the confirmationUrl. Frontend will handle redirect.
+            const authUrl = `${SHOPIFY_APP_URL}/Api/auth/shopify?shop=${shop}`;
+            return res.json({ confirmationUrl: authUrl });
         }
 
         // --- SPECIAL HANDLING FOR FREE PLAN ---
