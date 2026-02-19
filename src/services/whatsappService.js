@@ -561,6 +561,7 @@ class WhatsAppService {
                                 type: { $in: ["pending", "pre-cancel", "feedback-pending"] },
                                 createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) }
                             }).sort({ createdAt: -1 });
+                            console.log(`[Interaction] LID poll lookup: found log? ${!!log}, type: ${log?.type}, orderId: ${log?.orderId}, createdAt: ${log?.createdAt?.toISOString()}`);
                         } else {
                             const phoneSuffix = fromCleaner.slice(-9);
                             if (phoneSuffix) {
@@ -901,6 +902,7 @@ class WhatsAppService {
                         }
 
                         // 2. PROCESS INTENT
+                        console.log(`[Interaction] DECISION: activityStatus=${activityStatus}, tagToAdd=${tagToAdd}, logType=${log?.type}, orderId=${log?.orderId}`);
                         if (activityStatus && tagToAdd && log && log.orderId) {
                             console.log(`[Interaction] SUCCESS: Order ${log.orderId}. Intent: ${activityStatus}. Current Log Type: ${log.type}`);
 
