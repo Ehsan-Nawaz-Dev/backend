@@ -26,6 +26,8 @@ class WhatsAppService {
         this.sockets = new Map(); // shopDomain -> socket instance
         this.io = null; // Socket.io instance
         this.sessionMessageCounts = new Map(); // shopDomain -> message count in session
+        this.cachedVersion = null; // Cache Baileys version to avoid GitHub fetch every time
+        this.cachedVersionTime = 0; // Timestamp of last version fetch
         this.messageStores = new Map(); // shopDomain -> Map of msgId -> message (for poll decryption)
         this.conflictCounts = new Map(); // shopDomain -> count of consecutive conflicts
         this.pendingInits = new Set(); // shopDomain -> is initializing
@@ -309,8 +311,32 @@ class WhatsAppService {
                 await WhatsAppService.delay(500); // Give it a moment to clear
             }
 
-            const { state, saveCreds } = await this.useMongoDBAuthState(shopDomain);
-            const { version } = await fetchLatestBaileysVersion();
+            // Run auth state and version fetch in PARALLEL for speed
+            const VERSION_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+            const now = Date.now();
+
+            const [authResult, version] = await Promise.all([
+                this.useMongoDBAuthState(shopDomain),
+                (async () => {
+                    // Use cached version if fresh (saves 2-5s GitHub fetch)
+                    if (this.cachedVersion && (now - this.cachedVersionTime) < VERSION_CACHE_TTL) {
+                        console.log(`[WhatsApp] Using cached Baileys version: ${JSON.stringify(this.cachedVersion)}`);
+                        return this.cachedVersion;
+                    }
+                    try {
+                        const { version: v } = await fetchLatestBaileysVersion();
+                        this.cachedVersion = v;
+                        this.cachedVersionTime = now;
+                        console.log(`[WhatsApp] Fetched fresh Baileys version: ${JSON.stringify(v)}`);
+                        return v;
+                    } catch (err) {
+                        console.warn(`[WhatsApp] Failed to fetch version, using fallback:`, err.message);
+                        return this.cachedVersion || [2, 3000, 1015901307];
+                    }
+                })()
+            ]);
+
+            const { state, saveCreds } = authResult;
 
             const sock = makeWASocket({
                 version,
@@ -321,6 +347,8 @@ class WhatsAppService {
                 },
                 logger,
                 browser: ["Whatomatic Backend", "Chrome", "1.1.0"],
+                connectTimeoutMs: 20000, // 20s connection timeout (faster failure detection)
+                qrTimeout: 40000, // 40s QR code timeout
                 getMessage: async (key) => {
                     // Required by Baileys for poll vote decryption
                     const fullMsg = await this.getMessageFromStore(shopDomain, key);
