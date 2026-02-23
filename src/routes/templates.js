@@ -47,6 +47,7 @@ router.post("/", async (req, res) => {
       enabled: req.body.enabled ?? true,
       isPoll: req.body.isPoll,
       pollOptions: req.body.pollOptions,
+      sendingDelay: req.body.sendingDelay || 0,
     });
 
     res.status(201).json(template);
@@ -68,6 +69,7 @@ router.put("/:id", async (req, res) => {
         enabled: req.body.enabled,
         isPoll: req.body.isPoll,
         pollOptions: req.body.pollOptions,
+        sendingDelay: req.body.sendingDelay || 0,
       },
       { new: true },
     );

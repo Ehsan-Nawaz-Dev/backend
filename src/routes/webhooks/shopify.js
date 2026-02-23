@@ -433,6 +433,12 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
                     let result;
                     console.log(`[ShopifyWebhook] Sending WhatsApp to ${customerPhoneFormatted} via ${updatedMerchant.whatsappProvider}...`);
+
+                    if (customerTemplate?.sendingDelay && customerTemplate.sendingDelay > 0) {
+                        console.log(`[ShopifyWebhook] Delaying message by ${customerTemplate.sendingDelay} minutes...`);
+                        await new Promise(resolve => setTimeout(resolve, customerTemplate.sendingDelay * 60 * 1000));
+                    }
+
                     if (customerTemplate?.isPoll && customerTemplate?.pollOptions?.length > 0) {
                         result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, customerMsg, customerTemplate.pollOptions, orderId);
                     } else {
@@ -547,6 +553,11 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 cancelMsg = replacePlaceholders(cancelMsg, { order, merchant });
                 cancelMsg = cancelMsg.replace(/{{customer_name}}/g, customerName);
 
+                if (cancelTemplate?.sendingDelay && cancelTemplate.sendingDelay > 0) {
+                    console.log(`[ShopifyWebhook] Delaying cancellation message by ${cancelTemplate.sendingDelay} minutes...`);
+                    await new Promise(resolve => setTimeout(resolve, cancelTemplate.sendingDelay * 60 * 1000));
+                }
+
                 if (cancelTemplate.isPoll && cancelTemplate.pollOptions?.length > 0) {
                     await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions, orderId);
                 } else {
@@ -591,6 +602,12 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     }
 
                     let result;
+
+                    if (abandonedTemplate?.sendingDelay && abandonedTemplate.sendingDelay > 0) {
+                        console.log(`[ShopifyWebhook] Delaying abandoned cart message by ${abandonedTemplate.sendingDelay} minutes...`);
+                        await new Promise(resolve => setTimeout(resolve, abandonedTemplate.sendingDelay * 60 * 1000));
+                    }
+
                     if (abandonedTemplate.isPoll && abandonedTemplate.pollOptions?.length > 0) {
                         result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, abandonedMsg, abandonedTemplate.pollOptions, orderId);
                     } else {
@@ -644,6 +661,11 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 let fulfillmentMsg = template.message;
                 fulfillmentMsg = replacePlaceholders(fulfillmentMsg, { order, merchant });
                 fulfillmentMsg = fulfillmentMsg.replace(/{{customer_name}}/g, customerName);
+
+                if (template?.sendingDelay && template.sendingDelay > 0) {
+                    console.log(`[ShopifyWebhook] Delaying fulfillment message by ${template.sendingDelay} minutes...`);
+                    await new Promise(resolve => setTimeout(resolve, template.sendingDelay * 60 * 1000));
+                }
 
                 const result = template.isPoll ? await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, fulfillmentMsg, template.pollOptions, orderId) : await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, fulfillmentMsg);
 

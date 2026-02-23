@@ -21,6 +21,7 @@ const TemplateSchema = new mongoose.Schema(
     enabled: { type: Boolean, default: true },
     isPoll: { type: Boolean, default: false },
     pollOptions: { type: [String], default: ["✅Yes, Confirm✅", "❌No, Cancel❌"] },
+    sendingDelay: { type: Number, default: 0 }, // Sending delay in minutes. 0 = default safe guard
   },
   { timestamps: true },
 );
