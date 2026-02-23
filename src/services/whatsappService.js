@@ -359,7 +359,7 @@ class WhatsAppService {
                     keys: makeCacheableSignalKeyStore(state.keys, logger),
                 },
                 logger,
-                browser: ["Whatomatic Backend", "Chrome", "1.1.0"],
+                browser: Browsers.macOS('Desktop'),
                 connectTimeoutMs: 20000,
                 qrTimeout: 40000,
                 syncFullHistory: false, // Don't sync full history — reduces conflicts and speeds up connection
