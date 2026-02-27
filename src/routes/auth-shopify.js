@@ -262,7 +262,7 @@ async function seedMerchantData(merchant) {
       name: "Order Confirmation",
       event: "orders/create",
       message: `Hi {{customer_name}}! 👋\n\nThank you for your order from {{store_name}}!\n\n📦 *Order:* {{order_number}}\n🛒 *Items:* {{items_list}}\n💰 *Total:* {{grand_total}}\n📍 *Address:* {{address}}, {{city}}\n\nPlease confirm if these details are correct.`,
-      enabled: true,
+      enabled: false,
       isPoll: true,
       pollOptions: ["✅ Yes, Confirm", "❌ No, Cancel"]
     },
@@ -271,7 +271,7 @@ async function seedMerchantData(merchant) {
       name: "Order Cancelled",
       event: "orders/cancelled",
       message: `Hi {{customer_name}},\n\nYour order {{order_number}} has been cancelled.\n\nIf this was a mistake, please contact us.\n\nThank you for shopping with {{store_name}}!`,
-      enabled: true,
+      enabled: false,
       isPoll: false
     },
     {
@@ -279,7 +279,7 @@ async function seedMerchantData(merchant) {
       name: "Shipment Update",
       event: "fulfillments/update",
       message: `Hi {{customer_name}}! 🚚\n\nGreat news! Your order {{order_number}} has been shipped!\n\n📍 Track your package: {{tracking_link}}\n\nThank you for shopping with {{store_name}}!`,
-      enabled: true,
+      enabled: false,
       isPoll: false
     },
     {
@@ -287,7 +287,7 @@ async function seedMerchantData(merchant) {
       name: "Order Confirmed Reply",
       event: "orders/confirmed",
       message: `Thank you {{customer_name}}! your order {{order_number}} has been confirmed. ✅ We will notify you when it ships.`,
-      enabled: true,
+      enabled: false,
       isPoll: false
     },
     {
@@ -295,7 +295,7 @@ async function seedMerchantData(merchant) {
       name: "Cart Recovery",
       event: "checkouts/abandoned",
       message: `Hi {{customer_name}}, you left something in your cart! 🛒\n\nClick here to finish your purchase: {{cart_link}}\n\nThank you for visiting {{store_name}}!`,
-      enabled: true,
+      enabled: false,
       isPoll: false
     },
     {
@@ -303,7 +303,7 @@ async function seedMerchantData(merchant) {
       name: "Admin Order Alert",
       event: "admin-order-alert",
       message: `🔔 *New Order Alert!*\n\nOrder: {{order_number}}\nCustomer: {{customer_name}}\nTotal: {{grand_total}}\nItems: {{items_list}}\nAddress: {{address}}, {{city}}`,
-      enabled: true,
+      enabled: false,
       isPoll: false
     },
     {
@@ -311,7 +311,7 @@ async function seedMerchantData(merchant) {
       name: "Cancellation Verification",
       event: "orders/cancel_verify",
       message: `Are you sure you want to cancel your order? ❌\n\nThis will stop your order from being processed immediately.`,
-      enabled: true,
+      enabled: false,
       isPoll: true,
       pollOptions: ["🗑️ Yes, Cancel Order", "✅ No, Keep Order"]
     }
@@ -327,13 +327,13 @@ async function seedMerchantData(merchant) {
 
   // 2. Create Default Automation Settings
   const defaultAutomations = [
-    { shopDomain: shopDomain, type: "order-confirmation", enabled: true },
-    { shopDomain: shopDomain, type: "abandoned-cart", enabled: true },
-    { shopDomain: shopDomain, type: "shipment-update", enabled: true },
-    { shopDomain: shopDomain, type: "cancellation", enabled: true },
-    { shopDomain: shopDomain, type: "cancellation-verify", enabled: true },
-    { shopDomain: shopDomain, type: "order-confirmed-reply", enabled: true },
-    { shopDomain: shopDomain, type: "admin-order-alert", enabled: true }
+    { shopDomain: shopDomain, type: "order-confirmation", enabled: false },
+    { shopDomain: shopDomain, type: "abandoned-cart", enabled: false },
+    { shopDomain: shopDomain, type: "shipment-update", enabled: false },
+    { shopDomain: shopDomain, type: "cancellation", enabled: false },
+    { shopDomain: shopDomain, type: "cancellation-verify", enabled: false },
+    { shopDomain: shopDomain, type: "order-confirmed-reply", enabled: false },
+    { shopDomain: shopDomain, type: "admin-order-alert", enabled: false }
   ];
 
   for (const automation of defaultAutomations) {
