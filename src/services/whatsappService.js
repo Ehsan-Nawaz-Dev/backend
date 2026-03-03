@@ -1271,10 +1271,16 @@ class WhatsAppService {
         const session = await WhatsAppSession.findOne({ shopDomain });
         const merchant = await Merchant.findOne({ shopDomain });
         const sock = this.sockets.get(shopDomain);
+
+        // Prefer the live phone number from the active socket over the DB value
+        // This prevents showing the old/previous number before the DB is updated
+        const livePhoneNumber = sock?.user?.id ? sock.user.id.split(":")[0] : null;
+        const phoneNumber = livePhoneNumber || session?.phoneNumber;
+
         return {
             isConnected: !!(sock?.user),
             status: session?.status || "disconnected",
-            phoneNumber: session?.phoneNumber,
+            phoneNumber: phoneNumber || "",
             deviceName: "Windows Chrome", // Baileys uses this currently
             qrCode: session?.qrCode,
             lastConnected: session?.lastConnected,
