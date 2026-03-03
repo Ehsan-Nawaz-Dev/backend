@@ -415,7 +415,9 @@ class WhatsAppService {
 
                     if (isLoggedOut || (isConflict && statusCode === 401)) {
                         console.log(`Permanent disconnect (Logout/401 Conflict) for ${shopDomain}. Stopping auto-reconnect.`);
-                        await WhatsAppSession.findOneAndUpdate({ shopDomain }, { status: "disconnected", isConnected: false });
+                        this.sockets.delete(shopDomain);
+                        await WhatsAppAuth.deleteMany({ shopDomain });
+                        await WhatsAppSession.findOneAndUpdate({ shopDomain }, { status: "disconnected", isConnected: false, qrCode: null });
                     } else if (isConflict) {
                         // CONFLICT STRATEGY: Don't retry aggressively — it makes things worse.
                         // "conflict: replaced" means another client opened a connection.
