@@ -12,6 +12,12 @@ import { normalizePhoneNumber } from "../../utils/phoneNormalizer.js";
 import { Plan } from "../../models/Plan.js";
 import { NotificationSettings } from "../../models/NotificationSettings.js";
 import { Contact } from "../../models/Contact.js";
+import { WhatsAppAuth } from "../../models/WhatsAppAuth.js";
+import { WhatsAppSession } from "../../models/WhatsAppSession.js";
+import { AutomationStat } from "../../models/AutomationStat.js";
+import { Campaign } from "../../models/Campaign.js";
+import { ChatButtonSettings } from "../../models/ChatButtonSettings.js";
+import { PollMessage } from "../../models/PollMessage.js";
 
 const router = Router();
 
@@ -682,15 +688,32 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         const revenue = parseFloat(req.body?.total_price || 0);
         await automationService.trackRecovered(shopDomain, revenue);
     } else if (topic === "app/uninstalled") {
-        await Merchant.findOneAndUpdate(
-            { shopDomain },
-            {
-                isActive: false,
-                shopifyAccessToken: null,
-                uninstalledAt: new Date()
-            }
-        );
-        console.log(`[ShopifyWebhook] App UNINSTALLED for ${shopDomain}. Merchant marked inactive.`);
+        // First disconnect the active WhatsApp session from memory if it exists
+        try {
+            await whatsappService.disconnectClient(shopDomain);
+            console.log(`[ShopifyWebhook] WhatsApp client disconnected for ${shopDomain} upon uninstall.`);
+        } catch (err) {
+            console.warn(`[ShopifyWebhook] Error disconnecting WhatsApp client:`, err.message);
+        }
+
+        const merchantToDelete = await Merchant.findOne({ shopDomain });
+        if (merchantToDelete) {
+            await Promise.all([
+                Merchant.deleteOne({ _id: merchantToDelete._id }),
+                ActivityLog.deleteMany({ merchant: merchantToDelete._id }),
+                AutomationSetting.deleteMany({ shopDomain }),
+                Template.deleteMany({ merchant: merchantToDelete._id }),
+                Contact.deleteMany({ merchant: merchantToDelete._id }),
+                NotificationSettings.deleteMany({ merchant: merchantToDelete._id }),
+                WhatsAppAuth.deleteMany({ shopDomain }),
+                WhatsAppSession.deleteMany({ shopDomain }),
+                AutomationStat.deleteMany({ shopDomain }),
+                Campaign.deleteMany({ shopDomain }),
+                ChatButtonSettings.deleteMany({ shopDomain }),
+                PollMessage.deleteMany({ shopDomain })
+            ]);
+        }
+        console.log(`[ShopifyWebhook] App UNINSTALLED for ${shopDomain}. All store data immediately deleted.`);
     } else if (topic === "app_subscriptions/update") {
         const { app_subscription } = req.body;
         console.log(`[ShopifyWebhook] Subscription update for ${shopDomain}:`, app_subscription?.status);
@@ -778,13 +801,26 @@ router.post("/gdpr/shop_redact", verifyShopifyWebhook, async (req, res) => {
     console.log(`[GDPR] Shop Redact requested for ${shop_domain}. (Wait 48h as per policy)`);
 
     try {
-        // Mark as fully deleted or remove data after 48h
-        // For now, we ensure the merchant is inactive
-        await Merchant.findOneAndUpdate({ shopDomain: shop_domain }, { isActive: false, shopifyAccessToken: null });
-    } catch (err) {
-        console.error(`[GDPR] Shop Redact failed:`, err);
-    }
+        await whatsappService.disconnectClient(shop_domain);
+    } catch (err) { }
 
+    const merchantToDelete = await Merchant.findOne({ shopDomain: shop_domain });
+    if (merchantToDelete) {
+        await Promise.all([
+            Merchant.deleteOne({ _id: merchantToDelete._id }),
+            ActivityLog.deleteMany({ merchant: merchantToDelete._id }),
+            AutomationSetting.deleteMany({ shopDomain: shop_domain }),
+            Template.deleteMany({ merchant: merchantToDelete._id }),
+            Contact.deleteMany({ merchant: merchantToDelete._id }),
+            NotificationSettings.deleteMany({ merchant: merchantToDelete._id }),
+            WhatsAppAuth.deleteMany({ shopDomain: shop_domain }),
+            WhatsAppSession.deleteMany({ shopDomain: shop_domain }),
+            AutomationStat.deleteMany({ shopDomain: shop_domain }),
+            Campaign.deleteMany({ shopDomain: shop_domain }),
+            ChatButtonSettings.deleteMany({ shopDomain: shop_domain }),
+            PollMessage.deleteMany({ shopDomain: shop_domain })
+        ]);
+    }
     res.status(200).send("ok");
 });
 
