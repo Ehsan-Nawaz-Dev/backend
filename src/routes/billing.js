@@ -294,12 +294,14 @@ router.get('/status', async (req, res) => {
 
         const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
         const limit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+        const newlyInstalled = merchant.installedAt ? (Date.now() - new Date(merchant.installedAt).getTime() < 10 * 60 * 1000) : false;
 
         res.json({
             plan: merchant.plan || 'free',
             status: merchant.billingStatus || 'none',
             usage: merchant.usage || 0,
-            limit: limit
+            limit: limit,
+            isNewlyInstalled: newlyInstalled
         });
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch status' });
