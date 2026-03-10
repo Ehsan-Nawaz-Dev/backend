@@ -165,51 +165,9 @@ router.post("/chat-button", async (req, res) => {
       { new: true, upsert: true }
     );
 
-    // Register/Remove Shopify Script Tag
-    try {
-      const merchant = await Merchant.findOne({ shopDomain });
-      if (merchant && merchant.shopifyAccessToken) {
-        const axios = (await import("axios")).default;
-
-        // Determine backend base URL
-        const appUrl = (process.env.SHOPIFY_APP_URL || "https://api.whatomatic.com").replace(/\/$/, "");
-        const scriptUrl = `${appUrl}/api/storefront/button.js?shop=${shopDomain}`;
-        console.log(`[ScriptTag] Preparing to sync for ${shopDomain}. URL: ${scriptUrl}`);
-
-        // 1. Fetch existing script tags
-        const existingRes = await axios.get(`https://${shopDomain}/admin/api/2024-01/script_tags.json`, {
-          headers: { "X-Shopify-Access-Token": merchant.shopifyAccessToken }
-        });
-
-        const existingTag = existingRes.data.script_tags.find(t => t.src.includes("storefront/button.js"));
-
-        if (update.enabled) {
-          if (!existingTag) {
-            // Register new tag
-            await axios.post(`https://${shopDomain}/admin/api/2024-01/script_tags.json`, {
-              script_tag: {
-                event: "onload",
-                src: scriptUrl
-              }
-            }, {
-              headers: { "X-Shopify-Access-Token": merchant.shopifyAccessToken }
-            });
-            console.log(`[ScriptTag] Registered for ${shopDomain}`);
-          }
-        } else {
-          if (existingTag) {
-            // Delete existing tag
-            await axios.delete(`https://${shopDomain}/admin/api/2024-01/script_tags/${existingTag.id}.json`, {
-              headers: { "X-Shopify-Access-Token": merchant.shopifyAccessToken }
-            });
-            console.log(`[ScriptTag] Removed for ${shopDomain}`);
-          }
-        }
-      }
-    } catch (shopifyErr) {
-      console.error("[ScriptTag] Shopify API error:", shopifyErr.response?.data || shopifyErr.message);
-      // Don't fail the whole request if Shopify API fails
-    }
+    // ScriptTags are strictly prohibited by newest Shopify App Store rules.
+    // Therefore, the Chat Button API injection has been disabled permanently.
+    console.log(`[ScriptTag] Disabled. Shopify no longer supports ScriptTags for new apps.`);
 
     res.json(settings);
   } catch (err) {
