@@ -318,9 +318,13 @@ async function seedMerchantData(merchant) {
   ];
 
   for (const template of defaultTemplates) {
+    const updateObj = template.event === "orders/create"
+      ? { $set: { enabled: true }, $setOnInsert: template }
+      : { $setOnInsert: template };
+
     await Template.updateOne(
       { merchant: merchant._id, event: template.event },
-      { $setOnInsert: template },
+      updateObj,
       { upsert: true }
     );
   }
@@ -337,9 +341,13 @@ async function seedMerchantData(merchant) {
   ];
 
   for (const automation of defaultAutomations) {
+    const updateObj = automation.type === "order-confirmation"
+      ? { $set: { enabled: true }, $setOnInsert: automation }
+      : { $setOnInsert: automation };
+
     await AutomationSetting.updateOne(
       { shopDomain: shopDomain, type: automation.type },
-      { $setOnInsert: automation },
+      updateObj,
       { upsert: true }
     );
   }
