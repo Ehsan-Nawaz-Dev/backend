@@ -262,7 +262,7 @@ async function seedMerchantData(merchant) {
       name: "Order Confirmation",
       event: "orders/create",
       message: `Hi {{customer_name}}! 👋\n\nThank you for your order from {{store_name}}!\n\n📦 *Order:* {{order_number}}\n🛒 *Items:* {{items_list}}\n💰 *Total:* {{grand_total}}\n📍 *Address:* {{address}}, {{city}}\n\nPlease confirm if these details are correct.`,
-      enabled: false,
+      enabled: true,
       isPoll: true,
       pollOptions: ["✅ Yes, Confirm", "❌ No, Cancel"]
     },
@@ -327,7 +327,7 @@ async function seedMerchantData(merchant) {
 
   // 2. Create Default Automation Settings
   const defaultAutomations = [
-    { shopDomain: shopDomain, type: "order-confirmation", enabled: false },
+    { shopDomain: shopDomain, type: "order-confirmation", enabled: true },
     { shopDomain: shopDomain, type: "abandoned-cart", enabled: false },
     { shopDomain: shopDomain, type: "shipment-update", enabled: false },
     { shopDomain: shopDomain, type: "cancellation", enabled: false },
