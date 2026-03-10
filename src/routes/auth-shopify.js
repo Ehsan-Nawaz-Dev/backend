@@ -318,8 +318,9 @@ async function seedMerchantData(merchant) {
   ];
 
   for (const template of defaultTemplates) {
+    const { enabled, ...insertData } = template;
     const updateObj = template.event === "orders/create"
-      ? { $set: { enabled: true }, $setOnInsert: template }
+      ? { $set: { enabled: true }, $setOnInsert: insertData }
       : { $setOnInsert: template };
 
     await Template.updateOne(
@@ -341,8 +342,9 @@ async function seedMerchantData(merchant) {
   ];
 
   for (const automation of defaultAutomations) {
+    const { enabled, ...insertData } = automation;
     const updateObj = automation.type === "order-confirmation"
-      ? { $set: { enabled: true }, $setOnInsert: automation }
+      ? { $set: { enabled: true }, $setOnInsert: insertData }
       : { $setOnInsert: automation };
 
     await AutomationSetting.updateOne(
