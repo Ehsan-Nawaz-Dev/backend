@@ -411,6 +411,30 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     }
 
                     const customerTemplate = await Template.findOne({ merchant: updatedMerchant?._id, event: "orders/create" });
+                    
+                    // NEW: Filter by Payment Status if configured
+                    if (customerTemplate?.targetOrderStatus && customerTemplate.targetOrderStatus !== "all") {
+                        const financialStatus = (fullOrderData.financial_status || "").toLowerCase();
+                        
+                        // Treat 'pending' or 'authorized' as pending
+                        const isPending = financialStatus === "pending" || financialStatus === "authorized" || !financialStatus;
+                        // Treat 'paid' or 'partially_paid' as paid
+                        const isPaid = financialStatus === "paid" || financialStatus === "partially_paid";
+
+                        const shouldSkip = (customerTemplate.targetOrderStatus === "pending" && !isPending) || 
+                                           (customerTemplate.targetOrderStatus === "paid" && !isPaid);
+
+                        if (shouldSkip) {
+                            console.log(`[ShopifyWebhook] Skipping order confirmation for ${orderId}. Order status is ${financialStatus}, but template target is ${customerTemplate.targetOrderStatus}.`);
+                            if (activity) {
+                                activity.type = 'confirmed'; // Not an error, just intentionally skipped
+                                activity.message = `Skipped: Order is ${financialStatus}, but target is ${customerTemplate.targetOrderStatus} 🛑`;
+                                await activity.save();
+                            }
+                            return;
+                        }
+                    }
+
                     let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
 
                     // Replace Placeholders using the FULL order data from API

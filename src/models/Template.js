@@ -22,6 +22,7 @@ const TemplateSchema = new mongoose.Schema(
     isPoll: { type: Boolean, default: false },
     pollOptions: { type: [String], default: ["✅Yes, Confirm✅", "❌No, Cancel❌"] },
     sendingDelay: { type: Number, default: 0 }, // Sending delay in minutes. 0 = default safe guard
+    targetOrderStatus: { type: String, enum: ["all", "pending", "paid"], default: "all" }, // Used to filter orders by payment status
   },
   { timestamps: true },
 );
