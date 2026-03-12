@@ -60,10 +60,10 @@ const verifyShopifyWebhook = (req, res, next) => {
 
     // Use rawBody captured in server.js middleware for perfect HMAC matching
     // buf in express.json is a Buffer, which is ideal for crypto.update()
-    const body = req.rawBody || JSON.stringify(req.body);
+    const rawBodyBuffer = req.rawBody ? req.rawBody : Buffer.from(req.body ? JSON.stringify(req.body) : "");
     const generatedHash = crypto
         .createHmac("sha256", secret)
-        .update(body)
+        .update(rawBodyBuffer)
         .digest("base64");
 
     // Timing safe comparison to satisfy security audits
