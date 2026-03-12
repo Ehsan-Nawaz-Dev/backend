@@ -17,7 +17,7 @@ import diagnosticsRouter from "./diagnostics.js";
 import billingRouter from "./billing.js";
 import trialRouter from "./trial.js";
 import adminRouter from "./admin.js";
-import storefrontRouter from "./storefront.js";
+// import storefrontRouter from "./storefront.js";
 import { verifySessionToken } from "../middleware/auth.js";
 
 const router = Router();
@@ -160,6 +160,6 @@ router.use("/billing", verifySessionToken, billingRouter);
 router.use("/plans", planRouter); // Register here
 router.use("/trial", verifySessionToken, trialRouter);
 router.use("/admin", adminRouter);
-router.use("/storefront", storefrontRouter);
+// router.use("/storefront", storefrontRouter);
 
 export default router;
