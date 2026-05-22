@@ -299,6 +299,23 @@ export function normalizePhoneNumber(rawPhone, order = null) {
 function detectCountryFromOrder(order) {
     if (!order) return null;
 
+    if (typeof order === 'string') {
+        if (order.length === 2) return order.toUpperCase();
+        const COUNTRY_NAME_MAP = {
+            'pakistan': 'PK', 'india': 'IN', 'united states': 'US', 'usa': 'US',
+            'united kingdom': 'GB', 'uk': 'GB', 'canada': 'CA', 'australia': 'AU',
+            'saudi arabia': 'SA', 'uae': 'AE', 'united arab emirates': 'AE',
+            'germany': 'DE', 'france': 'FR', 'turkey': 'TR', 'china': 'CN',
+            'brazil': 'BR', 'south africa': 'ZA', 'nigeria': 'NG', 'kenya': 'KE',
+            'egypt': 'EG', 'bangladesh': 'BD', 'sri lanka': 'LK', 'nepal': 'NP',
+            'malaysia': 'MY', 'indonesia': 'ID', 'thailand': 'TH', 'japan': 'JP',
+            'south korea': 'KR', 'singapore': 'SG', 'philippines': 'PH',
+            'new zealand': 'NZ', 'mexico': 'MX', 'colombia': 'CO',
+            'argentina': 'AR', 'chile': 'CL',
+        };
+        return COUNTRY_NAME_MAP[order.toLowerCase()] || null;
+    }
+
     // Priority: shipping → billing → customer default
     const country =
         order.shipping_address?.country_code ||
