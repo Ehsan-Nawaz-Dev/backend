@@ -104,6 +104,10 @@ const triggerInternalAlert = async (type, merchant, orderData) => {
         if (type === 'cancelled' && !settings.notifyOnCancel) return;
         if (type === 'pending' && !settings.notifyOnAbandoned) return;
 
+        // Skip internal alert for fulfillment webhooks, as they should only be sent to the customer
+        // or through the new AutomationSettings flows
+        if (['shipped', 'delivered', 'fulfilled'].includes(type)) return;
+
         const orderNumber = orderData.name || orderData.order_number || `#${orderData.id}`;
         const customerName = orderData.customer?.first_name ? `${orderData.customer.first_name} ${orderData.customer.last_name || ''}` : "Customer";
 
