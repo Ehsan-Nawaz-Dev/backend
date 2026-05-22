@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { seedPlans } from "../utils/seeder.js";
+import { seedPlans, upgradeShippingTemplates } from "../utils/seeder.js";
 
 let isConnected = false;
 
@@ -19,6 +19,9 @@ export const connectDB = async () => {
 
     // Seed default plans if they don't exist
     await seedPlans();
+
+    // One-time migration: upgrade old shipping templates to include tracking info
+    await upgradeShippingTemplates();
   } catch (err) {
     console.error("MongoDB connection error", err);
     throw err;

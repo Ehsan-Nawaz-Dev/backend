@@ -1,4 +1,22 @@
 import { Plan } from '../models/Plan.js';
+import { Template } from '../models/Template.js';
+
+export const upgradeShippingTemplates = async () => {
+    try {
+        const oldMessage = `Hi {{customer_name}}! 🚚\n\nGreat news! Your order {{order_number}} has been shipped!\n\n📍 Track your package: {{tracking_link}}\n\nThank you for shopping with {{store_name}}!`;
+        const newMessage = `Hi {{customer_name}}! 🚚\n\nGreat news! Your order {{order_number}} has been shipped via {{courier}}!\n\n📦 Tracking Number: {{tracking_number}}\n📍 Track your package: {{tracking_link}}\n\nThank you for shopping with {{store_name}}!`;
+
+        const result = await Template.updateMany(
+            { event: "fulfillments/update", message: oldMessage },
+            { $set: { message: newMessage } }
+        );
+        if (result.modifiedCount > 0) {
+            console.log(`[Seeder] ✅ Upgraded ${result.modifiedCount} old shipping templates to include tracking number.`);
+        }
+    } catch (err) {
+        console.error('[Seeder] ❌ Error upgrading shipping templates:', err);
+    }
+};
 
 /**
  * Seeds default subscription plans if the collection is empty.
