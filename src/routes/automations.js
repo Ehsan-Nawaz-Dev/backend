@@ -22,10 +22,12 @@ router.get("/stats", async (req, res) => {
 
         const types = [
             { id: "admin-order-alert", name: "Admin Order Alert" },
+            { id: "admin-confirmed-alert", name: "Admin Order Confirmed Alert" },
             { id: "order-confirmation", name: "Order Confirmation" },
             { id: "order-confirmed-reply", name: "Post-Confirmation Reply" },
             { id: "abandoned_cart", name: "Abandoned Cart" },
             { id: "fulfillment_update", name: "Shipping Update" },
+            { id: "fulfillment_delivered", name: "Delivery Update" },
             { id: "cancellation", name: "Order Cancellation" },
             { id: "cancellation-verify", name: "Cancellation Verification" }
         ];

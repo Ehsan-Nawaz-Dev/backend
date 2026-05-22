@@ -100,13 +100,39 @@ export const replacePlaceholders = (template, data) => {
 
         // Order details
         "{{items_list}}": (order.line_items || order.order?.line_items || []).map(item => `${item.title} x ${item.quantity}`).join(", "),
-        "{{tracking_link}}": order.tracking_url || order.tracking_urls?.[0] || order.fulfillments?.[0]?.tracking_url || "",
+    };
+
+    const trackingLink = order.tracking_url || order.tracking_urls?.[0] || order.fulfillments?.[0]?.tracking_url || order.fulfillments?.[0]?.tracking_urls?.[0] || "";
+    const trackingNumber = order.tracking_number || order.tracking_numbers?.[0] || order.fulfillments?.[0]?.tracking_number || order.fulfillments?.[0]?.tracking_numbers?.[0] || "";
+    const courier = order.tracking_company || order.fulfillments?.[0]?.tracking_company || "";
+
+    const extendedPlaceholders = {
+        ...placeholders,
+        "{{tracking_link}}": trackingLink,
+        "{{tracking_number}}": trackingNumber,
+        "{{courier}}": courier,
+        "{{courier_name}}": courier
     };
 
     let message = template;
-    for (const [placeholder, value] of Object.entries(placeholders)) {
+
+    // Filter out lines containing empty tracking placeholders for SAAS/digital products
+    let lines = message.split(/\r?\n/);
+    lines = lines.filter(line => {
+        if (!trackingLink && line.includes("{{tracking_link}}")) return false;
+        if (!trackingNumber && line.includes("{{tracking_number}}")) return false;
+        if (!courier && (line.includes("{{courier}}") || line.includes("{{courier_name}}"))) return false;
+        return true;
+    });
+    message = lines.join("\n");
+
+    for (const [placeholder, value] of Object.entries(extendedPlaceholders)) {
         // Safe replacement for all occurrences
         message = message.split(placeholder).join(String(value || ""));
     }
+
+    // Clean up consecutive blank lines (reduce multiple newlines to max 2 consecutive newlines)
+    message = message.replace(/\n{3,}/g, "\n\n").trim();
+
     return message;
 };

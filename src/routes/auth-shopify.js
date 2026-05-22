@@ -284,6 +284,14 @@ async function seedMerchantData(merchant) {
     },
     {
       merchant: merchant._id,
+      name: "Delivery Update",
+      event: "fulfillments/delivered",
+      message: `Hi {{customer_name}}! 🚚\n\nYour order {{order_number}} has been delivered!\n\nThank you for shopping with {{store_name}}!`,
+      enabled: false,
+      isPoll: false
+    },
+    {
+      merchant: merchant._id,
       name: "Order Confirmed Reply",
       event: "orders/confirmed",
       message: `Thank you {{customer_name}}! your order {{order_number}} has been confirmed. ✅ We will notify you when it ships.`,
@@ -303,6 +311,14 @@ async function seedMerchantData(merchant) {
       name: "Admin Order Alert",
       event: "admin-order-alert",
       message: `🔔 *New Order Alert!*\n\nOrder: {{order_number}}\nCustomer: {{customer_name}}\nTotal: {{grand_total}}\nItems: {{items_list}}\nAddress: {{address}}, {{city}}`,
+      enabled: false,
+      isPoll: false
+    },
+    {
+      merchant: merchant._id,
+      name: "Admin Order Confirmed Alert",
+      event: "admin-confirmed-alert",
+      message: `🔔 *Order Confirmed by Customer!*\n\nOrder {{order_number}} has been confirmed by customer {{customer_name}}! ✅\n\n*Items:*\n{{items_list}}\n\n*Grand Total:* {{grand_total}}\n\n*Shipping Address:*\n{{address}}, {{city}}`,
       enabled: false,
       isPoll: false
     },
@@ -335,10 +351,12 @@ async function seedMerchantData(merchant) {
     { shopDomain: shopDomain, type: "order-confirmation", enabled: true },
     { shopDomain: shopDomain, type: "abandoned_cart", enabled: false },
     { shopDomain: shopDomain, type: "fulfillment_update", enabled: false },
+    { shopDomain: shopDomain, type: "fulfillment_delivered", enabled: false },
     { shopDomain: shopDomain, type: "cancellation", enabled: false },
     { shopDomain: shopDomain, type: "cancellation-verify", enabled: false },
     { shopDomain: shopDomain, type: "order-confirmed-reply", enabled: false },
-    { shopDomain: shopDomain, type: "admin-order-alert", enabled: false }
+    { shopDomain: shopDomain, type: "admin-order-alert", enabled: false },
+    { shopDomain: shopDomain, type: "admin-confirmed-alert", enabled: false }
   ];
 
   for (const automation of defaultAutomations) {

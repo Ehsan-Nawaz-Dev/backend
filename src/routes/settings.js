@@ -88,7 +88,7 @@ router.put("/", async (req, res) => {
     const update = {
       storeName: req.body.storeName,
       whatsappNumber: req.body.whatsappNumber,
-      adminPhoneNumber: req.body.adminPhoneNumber ? req.body.adminPhoneNumber.replace(/[^0-9]/g, "") : undefined,
+      adminPhoneNumber: req.body.adminPhoneNumber ? req.body.adminPhoneNumber.replace(/[^0-9]/g, "") : null,
       defaultCountry: req.body.defaultCountry,
       language: req.body.language,
       orderConfirmTag: req.body.orderConfirmTag,

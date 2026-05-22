@@ -1096,10 +1096,10 @@ class WhatsAppService {
                                 await WhatsAppService.delay(2000);
                                 try {
                                     const { AutomationSetting } = await import("../models/AutomationSetting.js");
-                                    const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
+                                    const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-confirmed-alert" });
 
                                     if (adminSetting?.enabled && merchant.adminPhoneNumber) {
-                                        const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
+                                        const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-confirmed-alert" });
                                         if (adminTemplate) {
                                             const orderData = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, log.orderId);
                                             if (orderData) {
@@ -1107,7 +1107,7 @@ class WhatsAppService {
                                                 const { automationService } = await import("./automationService.js");
                                                 let adminMsg = replacePlaceholders(adminTemplate.message, { order: orderData, merchant });
                                                 await this.sendMessage(shopDomain, merchant.adminPhoneNumber, adminMsg);
-                                                await automationService.trackSent(shopDomain, "admin-order-alert");
+                                                await automationService.trackSent(shopDomain, "admin-confirmed-alert");
                                             }
                                         }
                                     }

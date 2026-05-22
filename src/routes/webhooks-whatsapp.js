@@ -84,17 +84,17 @@ router.post("/", async (req, res) => {
             await shopifyService.addOrderTag(shop, merchant.shopifyAccessToken, log.orderId, tagToAdd, tagsToRemove);
 
             // 2. TRIGGER ADMIN ALERT (ONLY IF CONFIRMED)
-            if (selectedOption === "✅Yes, Confirm✅") {
+            if (isConfirm) {
               // Wait 60s before Admin Alert
               await (await import("../services/whatsappService.js")).whatsappService.constructor.delay(60000);
 
               try {
                 const { AutomationSetting } = await import("../models/AutomationSetting.js");
                 const { Template } = await import("../models/Template.js");
-                const adminSetting = await AutomationSetting.findOne({ shopDomain: merchant.shopDomain, type: "admin-order-alert" });
+                const adminSetting = await AutomationSetting.findOne({ shopDomain: merchant.shopDomain, type: "admin-confirmed-alert" });
 
                 if (adminSetting?.enabled && merchant.adminPhoneNumber) {
-                  const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-order-alert" });
+                  const adminTemplate = await Template.findOne({ merchant: merchant._id, event: "admin-confirmed-alert" });
                   if (adminTemplate) {
                     const orderData = await shopifyService.getOrder(merchant.shopDomain, merchant.shopifyAccessToken, log.orderId);
                     if (orderData) {
@@ -102,7 +102,7 @@ router.post("/", async (req, res) => {
                       const { automationService } = await import("../services/automationService.js");
                       let adminMsg = replacePlaceholders(adminTemplate.message, { order: orderData, merchant });
                       await whatsappService.sendMessage(shop, merchant.adminPhoneNumber, adminMsg);
-                      await automationService.trackSent(merchant.shopDomain, "admin-order-alert");
+                      await automationService.trackSent(merchant.shopDomain, "admin-confirmed-alert");
                     }
                   }
                 }

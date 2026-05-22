@@ -239,10 +239,12 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             tracking_urls: order.tracking_urls,
             tracking_number: order.tracking_number,
             tracking_numbers: order.tracking_numbers,
+            tracking_company: order.tracking_company,
             fulfillments: [
                 {
                     tracking_url: order.tracking_url,
                     tracking_number: order.tracking_number,
+                    tracking_company: order.tracking_company,
                     ...order
                 }
             ]
@@ -277,7 +279,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         }
     }
 
-    const isDuplicateWebhook = async (merchantId, orderId, topic) => {
+    const isDuplicateWebhook = async (merchantId, orderId, topic, actualType = null) => {
         try {
             const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
 
@@ -293,9 +295,9 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             }
 
             // For other topics, use specific type matches
-            const type = topic.includes('cancel') ? 'cancelled' :
+            const type = actualType || (topic.includes('cancel') ? 'cancelled' :
                 (topic.includes('abandoned') ? 'pending' :
-                    (topic.includes('fulfill') ? 'shipped' : 'pending'));
+                    (topic.includes('fulfill') ? 'shipped' : 'pending')));
 
             const existing = await ActivityLog.findOne({
                 merchant: merchantId,
@@ -394,7 +396,34 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         // Processing continues in the background
         (async () => {
             try {
-                // Trigger 1: Customer Confirmation (Customer is notified IMMEDIATELY)
+                // 1. Trigger Admin Alert (admin-order-alert) when order is first received
+                try {
+                    const adminSetting = await AutomationSetting.findOne({ shopDomain, type: "admin-order-alert" });
+                    const updatedMerchant = await Merchant.findOne({ shopDomain });
+                    if (adminSetting?.enabled && updatedMerchant?.adminPhoneNumber) {
+                        console.log(`[ShopifyWebhook] Admin Order Alert enabled. Preparing to send...`);
+                        const adminTemplate = await Template.findOne({ merchant: updatedMerchant._id, event: "admin-order-alert" });
+                        if (adminTemplate) {
+                            let fullOrderData = order;
+                            if (updatedMerchant.shopifyAccessToken && orderId) {
+                                try {
+                                    const apiOrderData = await shopifyService.getOrder(shopDomain, updatedMerchant.shopifyAccessToken, orderId);
+                                    if (apiOrderData) fullOrderData = apiOrderData;
+                                } catch (err) {
+                                    console.warn(`[ShopifyWebhook] Admin alert: failed to fetch order from API:`, err.message);
+                                }
+                            }
+                            let adminMsg = replacePlaceholders(adminTemplate.message, { order: fullOrderData, merchant: updatedMerchant });
+                            console.log(`[ShopifyWebhook] Sending Admin Order Alert to ${updatedMerchant.adminPhoneNumber}`);
+                            await whatsappService.sendMessage(shopDomain, updatedMerchant.adminPhoneNumber, adminMsg);
+                            await automationService.trackSent(shopDomain, "admin-order-alert");
+                        }
+                    }
+                } catch (adminErr) {
+                    console.error("[ShopifyWebhook] Admin order alert error:", adminErr);
+                }
+
+                // Trigger 2: Customer Confirmation (Customer is notified IMMEDIATELY)
                 const customerSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
                 if (customerSetting?.enabled) {
                     if (!customerPhoneFormatted) {
@@ -709,26 +738,34 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     } else if (topic === "fulfillments/update" || topic === "fulfillments/create") {
         const orderId = order.order_id?.toString() || order.id?.toString();
 
-        if (orderId && await isDuplicateWebhook(merchant._id, orderId, topic)) {
-            console.log(`[ShopifyWebhook] Duplicate fulfillments/update for ${orderId}. Skipping.`);
+        const isDelivered = order.shipment_status === "delivered" || orderForPlaceholders?.shipment_status === "delivered";
+        const targetType = isDelivered ? "delivered" : "shipped";
+        const automationType = isDelivered ? "fulfillment_delivered" : "fulfillment_update";
+        const templateEvent = isDelivered ? "fulfillments/delivered" : "fulfillments/update";
+
+        if (orderId && await isDuplicateWebhook(merchant._id, orderId, topic, targetType)) {
+            console.log(`[ShopifyWebhook] Duplicate fulfillments update/create for ${orderId} as ${targetType}. Skipping.`);
             return res.status(200).send('ok');
         }
 
-        await logEvent("shipped", req, shopDomain, { orderForPlaceholders, customerPhone: customerPhoneFormatted, customerName, orderId });
+        await logEvent(targetType, req, shopDomain, { orderForPlaceholders, customerPhone: customerPhoneFormatted, customerName, orderId });
         res.status(200).send("ok");
 
         (async () => {
             try {
-                const setting = await AutomationSetting.findOne({ shopDomain, type: "fulfillment_update" }) || await AutomationSetting.findOne({ shopDomain, type: "shipment-update" });
-                const template = await Template.findOne({ merchant: merchant._id, event: "fulfillments/update" });
+                let setting = await AutomationSetting.findOne({ shopDomain, type: automationType });
+                if (!setting && !isDelivered) {
+                    setting = await AutomationSetting.findOne({ shopDomain, type: "shipment-update" });
+                }
+                const template = await Template.findOne({ merchant: merchant._id, event: templateEvent });
 
                 if (!setting?.enabled || !template?.enabled) {
-                    console.log(`[ShopifyWebhook] Fulfillment skipped: setting=${!!setting?.enabled}, template=${!!template?.enabled}`);
+                    console.log(`[ShopifyWebhook] Fulfillment (${targetType}) skipped: setting=${!!setting?.enabled}, template=${!!template?.enabled}`);
                     return;
                 }
 
                 if (!customerPhoneFormatted) {
-                    console.warn(`[ShopifyWebhook] Cannot send fulfillment: No phone number for ${orderNumber}`);
+                    console.warn(`[ShopifyWebhook] Cannot send fulfillment (${targetType}): No phone number for ${orderNumber}`);
                     return;
                 }
 
@@ -736,7 +773,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
                 const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
                 if ((merchant.usage || 0) >= currentLimit) {
-                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment blocked)`);
+                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment ${targetType} blocked)`);
                     return;
                 }
 
@@ -745,7 +782,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 fulfillmentMsg = fulfillmentMsg.replace(/{{customer_name}}/g, customerName);
 
                 if (template?.sendingDelay && template.sendingDelay > 0) {
-                    console.log(`[ShopifyWebhook] Delaying fulfillment message by ${template.sendingDelay} minutes...`);
+                    console.log(`[ShopifyWebhook] Delaying fulfillment (${targetType}) message by ${template.sendingDelay} minutes...`);
                     await new Promise(resolve => setTimeout(resolve, template.sendingDelay * 60 * 1000));
                 }
 
@@ -753,10 +790,10 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
                 if (result?.success) {
                     await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
-                    await automationService.trackSent(shopDomain, "fulfillment_update");
+                    await automationService.trackSent(shopDomain, automationType);
                 }
             } catch (err) {
-                console.error(`[ShopifyWebhook] Error processing fulfillment:`, err);
+                console.error(`[ShopifyWebhook] Error processing fulfillment (${targetType}):`, err);
             }
         })();
         return;
