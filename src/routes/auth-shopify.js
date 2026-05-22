@@ -333,8 +333,8 @@ async function seedMerchantData(merchant) {
   // 2. Create Default Automation Settings
   const defaultAutomations = [
     { shopDomain: shopDomain, type: "order-confirmation", enabled: true },
-    { shopDomain: shopDomain, type: "abandoned-cart", enabled: false },
-    { shopDomain: shopDomain, type: "shipment-update", enabled: false },
+    { shopDomain: shopDomain, type: "abandoned_cart", enabled: false },
+    { shopDomain: shopDomain, type: "fulfillment_update", enabled: false },
     { shopDomain: shopDomain, type: "cancellation", enabled: false },
     { shopDomain: shopDomain, type: "cancellation-verify", enabled: false },
     { shopDomain: shopDomain, type: "order-confirmed-reply", enabled: false },

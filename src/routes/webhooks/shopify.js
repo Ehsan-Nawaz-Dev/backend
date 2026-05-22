@@ -662,9 +662,15 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
         (async () => {
             try {
-                // Abandoned cart often needs a different set of data, but we use the helper for consistency
+                const setting = await AutomationSetting.findOne({ shopDomain, type: "abandoned_cart" }) || await AutomationSetting.findOne({ shopDomain, type: "abandoned-cart" });
                 const abandonedTemplate = await Template.findOne({ merchant: merchant._id, event: "checkouts/abandoned" });
-                if (abandonedTemplate && abandonedTemplate.enabled && customerPhoneFormatted) {
+                
+                if (!setting?.enabled || !abandonedTemplate?.enabled) {
+                    console.log(`[ShopifyWebhook] Abandoned Cart skipped: setting=${!!setting?.enabled}, template=${!!abandonedTemplate?.enabled}`);
+                    return;
+                }
+
+                if (customerPhoneFormatted) {
                     let abandonedMsg = abandonedTemplate.message;
                     abandonedMsg = replacePlaceholders(abandonedMsg, { order, merchant });
                     abandonedMsg = abandonedMsg.replace(/{{customer_name}}/g, customerName);
@@ -713,7 +719,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
         (async () => {
             try {
-                const setting = await AutomationSetting.findOne({ shopDomain, type: "shipment-update" }) || await AutomationSetting.findOne({ shopDomain, type: "fulfillment_update" });
+                const setting = await AutomationSetting.findOne({ shopDomain, type: "fulfillment_update" }) || await AutomationSetting.findOne({ shopDomain, type: "shipment-update" });
                 const template = await Template.findOne({ merchant: merchant._id, event: "fulfillments/update" });
 
                 if (!setting?.enabled || !template?.enabled) {
