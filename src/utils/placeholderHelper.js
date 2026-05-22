@@ -100,7 +100,7 @@ export const replacePlaceholders = (template, data) => {
 
         // Order details
         "{{items_list}}": (order.line_items || order.order?.line_items || []).map(item => `${item.title} x ${item.quantity}`).join(", "),
-        "{{tracking_link}}": order.fulfillments?.[0]?.tracking_url || "",
+        "{{tracking_link}}": order.tracking_url || order.tracking_urls?.[0] || order.fulfillments?.[0]?.tracking_url || "",
     };
 
     let message = template;

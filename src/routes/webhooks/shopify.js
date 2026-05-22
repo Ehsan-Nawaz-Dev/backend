@@ -128,23 +128,27 @@ const triggerInternalAlert = async (type, merchant, orderData) => {
     }
 };
 
-const logEvent = async (type, req, shopDomain) => {
+const logEvent = async (type, req, shopDomain, customData = {}) => {
     try {
         const merchant = await Merchant.findOne({ shopDomain });
-        const { phone: customerPhone, name: customerName } = getCustomerData(req.body);
+        const { phone: customerPhone, name: customerName } = getCustomerData(customData.orderForPlaceholders || req.body);
+        const resolvedPhone = customData.customerPhone || customerPhone;
+        const resolvedName = customData.customerName || customerName;
+        const resolvedOrderId = customData.orderId || (type === "shipped" || type === "fulfilled" ? (req.body?.order_id?.toString() || req.body?.id?.toString()) : (req.body?.id?.toString() || req.body?.order_id?.toString()));
+
         const log = await ActivityLog.create({
             merchant: merchant?._id,
             type,
-            orderId: req.body?.id?.toString?.() || req.body?.order_id?.toString?.(),
-            customerName,
-            customerPhone,
+            orderId: resolvedOrderId,
+            customerName: resolvedName,
+            customerPhone: resolvedPhone,
             message: `Shopify webhook: ${type}`,
             rawPayload: req.body,
         });
 
         // Trigger Internal WhatsApp Alert if enabled
         if (merchant) {
-            triggerInternalAlert(type, merchant, req.body);
+            triggerInternalAlert(type, merchant, customData.orderForPlaceholders || req.body);
         }
 
         return log;
@@ -206,22 +210,64 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
     const body = req.body;
     const order = body.order || body; // Handle Shopify nesting
-    const { phone: customerPhoneRaw, name: customerName } = getCustomerData(order);
-    const orderId = order.id?.toString() || order.order_id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null);
-    const orderNumber = order.name || order.order_number || `#${orderId || 'N/A'}`;
+
+    // Determine if this is a fulfillment webhook
+    const isFulfillment = topic && topic.includes('fulfill');
+
+    // Resolve the actual Order ID (prioritize order_id for fulfillment webhooks)
+    const orderId = isFulfillment
+        ? (order.order_id?.toString() || order.id?.toString())
+        : (order.id?.toString() || order.order_id?.toString() || (order.admin_graphql_api_id ? order.admin_graphql_api_id.split('/').pop() : null));
+
+    // For fulfillment, pre-emptively fetch full order details if we have token and orderId
+    let apiOrder = null;
+    if (isFulfillment && merchant.shopifyAccessToken && orderId) {
+        console.log(`[ShopifyWebhook] Fulfillment topic detected. Fetching full order details for orderId ${orderId}...`);
+        try {
+            apiOrder = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, orderId);
+        } catch (err) {
+            console.warn(`[ShopifyWebhook] Failed to fetch order ${orderId} for fulfillment: ${err.message}`);
+        }
+    }
+
+    // Merge fulfillment details into the fetched order so placeholders resolve perfectly
+    let orderForPlaceholders = order;
+    if (isFulfillment && apiOrder) {
+        orderForPlaceholders = {
+            ...apiOrder,
+            tracking_url: order.tracking_url,
+            tracking_urls: order.tracking_urls,
+            tracking_number: order.tracking_number,
+            tracking_numbers: order.tracking_numbers,
+            fulfillments: [
+                {
+                    tracking_url: order.tracking_url,
+                    tracking_number: order.tracking_number,
+                    ...order
+                }
+            ]
+        };
+    } else {
+        orderForPlaceholders = apiOrder || order;
+    }
+
+    // Resolve customer info using the full order details if available
+    const { phone: customerPhoneRaw, name: customerName } = getCustomerData(orderForPlaceholders);
+    const orderNumber = orderForPlaceholders.name || orderForPlaceholders.order_number || `#${orderId || 'N/A'}`;
 
     // Format the Customer Phone (auto-detect country from order address)
-    let customerPhoneFormatted = normalizePhoneNumber(customerPhoneRaw, order);
+    let customerPhoneFormatted = normalizePhoneNumber(customerPhoneRaw, orderForPlaceholders);
 
-    // --- CASE: MISSING PHONE (Common in Fulfillments) ---
-    // If phone is missing and we have an orderId, try fetching the order to get the phone
-    if (!customerPhoneFormatted && orderId && merchant.shopifyAccessToken) {
+    // --- CASE: MISSING PHONE ---
+    // If phone is missing and we have an orderId, try fetching the order to get the phone (for non-fulfillment webhooks)
+    if (!customerPhoneFormatted && orderId && merchant.shopifyAccessToken && !apiOrder) {
         console.log(`[ShopifyWebhook] Phone missing for topic ${topic}. Attempting to fetch order ${orderId} for data...`);
         try {
-            const apiOrder = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, orderId);
+            apiOrder = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, orderId);
             if (apiOrder) {
                 const freshData = getCustomerData(apiOrder);
                 if (freshData.phone) {
+                    orderForPlaceholders = apiOrder;
                     customerPhoneFormatted = normalizePhoneNumber(freshData.phone, apiOrder);
                     console.log(`[ShopifyWebhook] Successfully recovered phone: ${customerPhoneFormatted}`);
                 }
@@ -655,14 +701,14 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         })();
         return;
     } else if (topic === "fulfillments/update" || topic === "fulfillments/create") {
-        const orderId = order.id?.toString() || order.order_id?.toString();
+        const orderId = order.order_id?.toString() || order.id?.toString();
 
         if (orderId && await isDuplicateWebhook(merchant._id, orderId, topic)) {
             console.log(`[ShopifyWebhook] Duplicate fulfillments/update for ${orderId}. Skipping.`);
             return res.status(200).send('ok');
         }
 
-        await logEvent("shipped", req, shopDomain);
+        await logEvent("shipped", req, shopDomain, { orderForPlaceholders, customerPhone: customerPhoneFormatted, customerName, orderId });
         res.status(200).send("ok");
 
         (async () => {
@@ -689,7 +735,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 }
 
                 let fulfillmentMsg = template.message;
-                fulfillmentMsg = replacePlaceholders(fulfillmentMsg, { order, merchant });
+                fulfillmentMsg = replacePlaceholders(fulfillmentMsg, { order: orderForPlaceholders, merchant });
                 fulfillmentMsg = fulfillmentMsg.replace(/{{customer_name}}/g, customerName);
 
                 if (template?.sendingDelay && template.sendingDelay > 0) {
