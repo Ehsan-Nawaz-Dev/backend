@@ -249,7 +249,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             // For other topics, use specific type matches
             const type = topic.includes('cancel') ? 'cancelled' :
                 (topic.includes('abandoned') ? 'pending' :
-                    (topic.includes('fulfill') ? 'confirmed' : 'pending'));
+                    (topic.includes('fulfill') ? 'shipped' : 'pending'));
 
             const existing = await ActivityLog.findOne({
                 merchant: merchantId,
@@ -662,7 +662,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             return res.status(200).send('ok');
         }
 
-        await logEvent("confirmed", req, shopDomain);
+        await logEvent("shipped", req, shopDomain);
         res.status(200).send("ok");
 
         (async () => {

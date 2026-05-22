@@ -90,7 +90,7 @@ router.post('/create', async (req, res) => {
             variables: {
                 name: `${planConfig.name} Plan`,
                 returnUrl: returnUrl,
-                test: true,
+                test: process.env.SHOPIFY_BILLING_TEST === 'true',
                 lineItems: [
                     {
                         plan: {
