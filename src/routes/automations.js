@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { AutomationStat } from "../models/AutomationStat.js";
 import { AutomationSetting } from "../models/AutomationSetting.js";
+import { Merchant } from "../models/Merchant.js";
+import { Template } from "../models/Template.js";
 
 const router = Router();
 
@@ -68,6 +70,29 @@ router.put("/toggle", async (req, res) => {
             { enabled },
             { upsert: true, new: true }
         );
+
+        const merchant = await Merchant.findOne({ shopDomain });
+        if (merchant) {
+            const eventMap = {
+                "admin-order-alert": "admin-order-alert",
+                "admin-confirmed-alert": "admin-confirmed-alert",
+                "abandoned_cart": "checkouts/abandoned",
+                "order-confirmation": "orders/create",
+                "order-confirmed-reply": "orders/confirmed",
+                "fulfillment_update": "fulfillments/update",
+                "fulfillment_delivered": "fulfillments/delivered",
+                "cancellation": "orders/cancelled",
+                "cancellation-verify": "orders/cancel_verify",
+            };
+            const eventType = eventMap[automationType];
+            if (eventType) {
+                await Template.findOneAndUpdate(
+                    { merchant: merchant._id, event: eventType },
+                    { enabled },
+                    { new: true }
+                );
+            }
+        }
 
         res.json(setting);
     } catch (err) {
