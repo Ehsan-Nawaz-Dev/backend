@@ -278,7 +278,7 @@ async function seedMerchantData(merchant) {
       merchant: merchant._id,
       name: "Shipment Update",
       event: "fulfillments/update",
-      message: `Hi {{customer_name}}! 🚚\n\nGreat news! Your order {{order_number}} has been shipped!\n\n📍 Track your package: {{tracking_link}}\n\nThank you for shopping with {{store_name}}!`,
+      message: `Hi {{customer_name}}! 🚚\n\nGreat news! Your order {{order_number}} has been shipped via {{courier}}!\n\n📦 Tracking Number: {{tracking_number}}\n📍 Track your package: {{tracking_link}}\n\nThank you for shopping with {{store_name}}!`,
       enabled: false,
       isPoll: false
     },
