@@ -68,11 +68,12 @@ router.post('/create', async (req, res) => {
         // GraphQL mutation for appSubscriptionCreate
         const graphqlQuery = {
             query: `
-                mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $test: Boolean, $lineItems: [AppSubscriptionLineItemInput!]!) {
+                mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $test: Boolean, $trialDays: Int, $lineItems: [AppSubscriptionLineItemInput!]!) {
                     appSubscriptionCreate(
                         name: $name
                         returnUrl: $returnUrl
                         test: $test
+                        trialDays: $trialDays
                         lineItems: $lineItems
                     ) {
                         confirmationUrl
@@ -91,6 +92,7 @@ router.post('/create', async (req, res) => {
                 name: `${planConfig.name} Plan`,
                 returnUrl: returnUrl,
                 test: process.env.SHOPIFY_BILLING_TEST === 'true',
+                trialDays: planConfig.trialDays && planConfig.trialDays > 0 ? planConfig.trialDays : null,
                 lineItems: [
                     {
                         plan: {

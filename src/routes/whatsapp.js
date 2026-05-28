@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { whatsappService } from "../services/whatsappService.js";
 import { Merchant } from "../models/Merchant.js";
+import { Plan } from "../models/Plan.js";
 
 const router = Router();
 
@@ -97,12 +98,24 @@ router.post("/send", async (req, res) => {
         }
 
         const merchant = await Merchant.findOne({ shopDomain });
-        if (merchant && merchant.plan === 'trial') {
-            if (merchant.trialUsage >= (merchant.trialLimit || 10)) {
-                return res.status(403).json({
-                    success: false,
-                    error: "Trial limit reached (10 messages max). Please upgrade to a paid plan."
-                });
+        if (merchant) {
+            if (merchant.plan === 'trial') {
+                if (merchant.trialUsage >= (merchant.trialLimit || 10)) {
+                    return res.status(403).json({
+                        success: false,
+                        error: "Trial limit reached (10 messages max). Please upgrade to a paid plan."
+                    });
+                }
+            } else {
+                const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
+                const currentLimit = planConfig ? planConfig.messageLimit : 10;
+                const currentUsage = merchant.usage || 0;
+                if (currentUsage >= currentLimit) {
+                    return res.status(403).json({
+                        success: false,
+                        error: `Plan limit reached (${currentLimit} messages max). Please upgrade to a paid plan.`
+                    });
+                }
             }
         }
 
@@ -114,9 +127,13 @@ router.post("/send", async (req, res) => {
         }
 
         if (result.success) {
-            // Increment trial usage
-            if (merchant && merchant.plan === 'trial') {
-                await Merchant.updateOne({ shopDomain }, { $inc: { trialUsage: 1 } });
+            // Increment usage
+            if (merchant) {
+                if (merchant.plan === 'trial') {
+                    await Merchant.updateOne({ shopDomain }, { $inc: { trialUsage: 1 } });
+                } else {
+                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1 } });
+                }
             }
 
             res.json({

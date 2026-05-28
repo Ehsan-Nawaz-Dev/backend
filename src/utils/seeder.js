@@ -24,23 +24,20 @@ export const upgradeShippingTemplates = async () => {
  */
 export const seedPlans = async () => {
     try {
-        const count = await Plan.countDocuments();
-        if (count > 0) {
-            console.log('[Seeder] Plans already exist, skipping seed.');
-            return;
-        }
-
-        console.log('[Seeder] Seeding default plans...');
+        console.log('[Seeder] Syncing default plans...');
         const defaultPlans = [
             {
                 id: 'free',
                 name: 'Free',
                 price: 0,
-                messageLimit: 10,
+                messageLimit: 50,
+                trialDays: 0,
                 features: [
-                    '10 messages per month',
-                    'Basic templates',
-                    'Standard support'
+                    "Up to 50 messages/month",
+                    "Automated WhatsApp Order Confirmations",
+                    "Abandoned Checkout Recovery",
+                    "Order Fulfillment Notifications",
+                    "Real-Time Analytics & Reporting"
                 ],
                 isActive: true,
                 isPopular: false
@@ -48,13 +45,16 @@ export const seedPlans = async () => {
             {
                 id: 'starter',
                 name: 'Starter',
-                price: 19,
-                messageLimit: 500,
+                price: 4.99,
+                messageLimit: 1250,
+                trialDays: 3,
                 features: [
-                    '500 messages per month',
-                    'Advanced templates',
-                    'Cart recovery',
-                    'Standard support'
+                    "Up to 1,250 messages/month",
+                    "Automated WhatsApp Order Confirmations",
+                    "Abandoned Checkout Recovery",
+                    "Order Fulfillment Notifications",
+                    "Customizable Message Templates",
+                    "3-Day Free Trial"
                 ],
                 isActive: true,
                 isPopular: false
@@ -62,36 +62,47 @@ export const seedPlans = async () => {
             {
                 id: 'growth',
                 name: 'Growth',
-                price: 49,
-                messageLimit: 2000,
+                price: 9.99,
+                messageLimit: 2500,
+                trialDays: 0,
                 features: [
-                    '2000 messages per month',
-                    'Advanced analytics',
-                    'Everything in Starter',
-                    'Priority support'
+                    "Up to 2,500 messages/month",
+                    "All Starter Features",
+                    "Automated Order Tag Updates",
+                    "Manual Campaigns",
+                    "Priority Support"
                 ],
                 isActive: true,
                 isPopular: true
             },
             {
-                id: 'pro',
-                name: 'Pro',
-                price: 99,
-                messageLimit: 5000,
+                id: 'professional',
+                name: 'Professional',
+                price: 14.99,
+                messageLimit: 4250,
+                trialDays: 0,
                 features: [
-                    '5,000 messages per month',
-                    'Multi-number support',
-                    'Dedicated manager',
-                    'Everything in Growth'
+                    "Up to 4,250 messages/month",
+                    "All Growth Features",
+                    "Custom Branding",
+                    "Dedicated Account Manager",
+                    "API Access"
                 ],
                 isActive: true,
                 isPopular: false
             }
         ];
 
-        await Plan.insertMany(defaultPlans);
-        console.log('[Seeder] ✅ Default plans seeded successfully.');
+        for (const plan of defaultPlans) {
+            await Plan.findOneAndUpdate(
+                { id: plan.id },
+                plan,
+                { upsert: true, new: true }
+            );
+            console.log(`[Seeder] Synced plan: ${plan.name}`);
+        }
+        console.log('[Seeder] ✅ All plans successfully synchronized.');
     } catch (err) {
-        console.error('[Seeder] ❌ Error seeding plans:', err);
+        console.error('[Seeder] ❌ Error syncing plans:', err);
     }
 };

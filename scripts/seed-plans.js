@@ -11,6 +11,7 @@ const plans = [
         name: "Free",
         price: 0,
         messageLimit: 50,
+        trialDays: 0,
         features: [
             "Up to 50 messages/month",
             "Automated WhatsApp Order Confirmations",
@@ -25,6 +26,7 @@ const plans = [
         name: "Starter",
         price: 4.99,
         messageLimit: 1250,
+        trialDays: 3,
         features: [
             "Up to 1,250 messages/month",
             "Automated WhatsApp Order Confirmations",
@@ -40,6 +42,7 @@ const plans = [
         name: "Growth",
         price: 9.99,
         messageLimit: 2500,
+        trialDays: 0,
         features: [
             "Up to 2,500 messages/month",
             "All Starter Features",
@@ -54,6 +57,7 @@ const plans = [
         name: "Professional",
         price: 14.99,
         messageLimit: 4250,
+        trialDays: 0,
         features: [
             "Up to 4,250 messages/month",
             "All Growth Features",
