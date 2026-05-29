@@ -1,5 +1,6 @@
 import { Plan } from '../models/Plan.js';
 import { Template } from '../models/Template.js';
+import { Admin } from '../models/Admin.js';
 
 export const upgradeShippingTemplates = async () => {
     try {
@@ -104,5 +105,17 @@ export const seedPlans = async () => {
         console.log('[Seeder] ✅ All plans successfully synchronized.');
     } catch (err) {
         console.error('[Seeder] ❌ Error syncing plans:', err);
+    }
+};
+
+export const seedAdmin = async () => {
+    try {
+        const count = await Admin.countDocuments();
+        if (count === 0) {
+            await Admin.create({ username: 'admin', password: 'admin123' });
+            console.log('[Seeder] ✅ Default admin credentials seeded successfully.');
+        }
+    } catch (err) {
+        console.error('[Seeder] ❌ Error seeding admin:', err);
     }
 };

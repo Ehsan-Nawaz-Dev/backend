@@ -12,6 +12,8 @@ import { NotificationSettings } from "../models/NotificationSettings.js";
 import { Plan } from "../models/Plan.js";
 import { Lead } from "../models/Lead.js";
 import { GlobalNotification } from "../models/GlobalNotification.js";
+import { Admin } from "../models/Admin.js";
+import { Ticket } from "../models/Ticket.js";
 
 const router = Router();
 
@@ -61,14 +63,20 @@ router.get("/merchants", async (req, res) => {
         // Map sessions to merchants
         const enrichedMerchants = merchants.map(merchant => {
             const session = sessions.find(s => s.shopDomain === merchant.shopDomain);
-            // Limit is either trialLimit (for trial/new) or plan.messageLimit
-            const limit = merchant.plan === 'trial' || !merchant.plan || merchant.plan === 'none' || merchant.plan === 'free'
+            // Limit is either trialLimit (for trial) or plan.messageLimit
+            const limit = merchant.plan === 'trial'
                 ? (merchant.trialLimit || 10)
-                : (planMap[merchant.plan] || 0);
+                : (planMap[merchant.plan || 'free'] || 50);
+
+            // Usage is trialUsage (for trial) or usage (for others)
+            const usage = merchant.plan === 'trial'
+                ? (merchant.trialUsage || 0)
+                : (merchant.usage || 0);
 
             return {
                 ...merchant,
                 limit,
+                usage,
                 isConnected: session?.isConnected || false,
                 lastConnected: session?.lastConnected,
                 status: session?.status || 'disconnected'
@@ -96,14 +104,62 @@ router.get("/activity", async (req, res) => {
     }
 });
 
-// POST /api/admin/login - Simple admin login
+// POST /api/admin/login - Admin login using dynamic DB credentials
 router.post("/login", async (req, res) => {
     const { username, password } = req.body;
-    // Hardcoded for simplicity as requested by user
-    if (username === "admin" && password === "admin123") {
-        res.json({ success: true, token: "admin-secret-token" });
-    } else {
-        res.status(401).json({ success: false, error: "Invalid credentials" });
+    try {
+        const admin = await Admin.findOne({ username });
+        if (admin && admin.password === password) {
+            res.json({ success: true, token: "admin-secret-token" });
+        } else {
+            res.status(401).json({ success: false, error: "Invalid credentials" });
+        }
+    } catch (err) {
+        res.status(500).json({ error: "Server error during login" });
+    }
+});
+
+// POST /api/admin/change-password - Change admin password
+router.post("/change-password", async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        const admin = await Admin.findOne({ username: 'admin' });
+        if (!admin) return res.status(404).json({ error: "Admin account not found" });
+
+        if (admin.password !== currentPassword) {
+            return res.status(400).json({ error: "Current password is incorrect" });
+        }
+
+        admin.password = newPassword;
+        await admin.save();
+        res.json({ success: true, message: "Password updated successfully" });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to update password" });
+    }
+});
+
+// GET /api/admin/tickets - Fetch all support tickets
+router.get("/tickets", async (req, res) => {
+    try {
+        const tickets = await Ticket.find().sort({ createdAt: -1 });
+        res.json(tickets);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch tickets" });
+    }
+});
+
+// PUT /api/admin/tickets/:id/resolve - Resolve a support ticket (mark status as closed)
+router.put("/tickets/:id/resolve", async (req, res) => {
+    try {
+        const ticket = await Ticket.findByIdAndUpdate(
+            req.params.id,
+            { status: 'closed' },
+            { new: true }
+        );
+        if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+        res.json({ success: true, ticket });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to resolve ticket" });
     }
 });
 
