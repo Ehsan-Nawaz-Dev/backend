@@ -283,7 +283,10 @@ router.get('/status', async (req, res) => {
             // Has active plan but no token — return status with needsToken flag
             console.warn(`[Billing] Token missing for ${shop} but has active ${merchant.plan} plan. Returning status with needsToken flag.`);
             const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
-            const limit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+            const baseLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+            const limit = merchant.plan === 'trial'
+                ? baseLimit
+                : baseLimit + Math.max(0, (merchant.trialLimit || 10) - 10);
             return res.json({
                 plan: merchant.plan || 'free',
                 status: merchant.billingStatus || 'none',
@@ -295,7 +298,10 @@ router.get('/status', async (req, res) => {
         }
 
         const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
-        const limit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+        const baseLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+        const limit = merchant.plan === 'trial'
+            ? baseLimit
+            : baseLimit + Math.max(0, (merchant.trialLimit || 10) - 10);
         const newlyInstalled = merchant.installedAt ? (Date.now() - new Date(merchant.installedAt).getTime() < 10 * 60 * 1000) : false;
 
         res.json({

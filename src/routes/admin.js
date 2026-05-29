@@ -63,10 +63,14 @@ router.get("/merchants", async (req, res) => {
         // Map sessions to merchants
         const enrichedMerchants = merchants.map(merchant => {
             const session = sessions.find(s => s.shopDomain === merchant.shopDomain);
-            // Limit is either trialLimit (for trial) or plan.messageLimit
-            const limit = merchant.plan === 'trial'
+            // Limit is either trialLimit (for trial) or plan.messageLimit + extended trial limit surplus
+            const baseLimit = merchant.plan === 'trial'
                 ? (merchant.trialLimit || 10)
                 : (planMap[merchant.plan || 'free'] || 50);
+
+            const limit = merchant.plan === 'trial'
+                ? baseLimit
+                : baseLimit + Math.max(0, (merchant.trialLimit || 10) - 10);
 
             // Usage is trialUsage (for trial) or usage (for others)
             const usage = merchant.plan === 'trial'

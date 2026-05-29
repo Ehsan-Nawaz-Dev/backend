@@ -108,7 +108,8 @@ router.post("/send", async (req, res) => {
                 }
             } else {
                 const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
-                const currentLimit = planConfig ? planConfig.messageLimit : 10;
+                const baseLimit = planConfig ? planConfig.messageLimit : 10;
+                const currentLimit = baseLimit + Math.max(0, (merchant.trialLimit || 10) - 10);
                 const currentUsage = merchant.usage || 0;
                 if (currentUsage >= currentLimit) {
                     return res.status(403).json({
