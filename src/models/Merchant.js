@@ -39,6 +39,11 @@ const MerchantSchema = new mongoose.Schema(
     billingStatus: { type: String, default: 'inactive' },
     shopifySubscriptionId: { type: String }, // GraphQL subscription ID
 
+    // Expiring Offline Access Tokens
+    shopifyRefreshToken: { type: String },
+    shopifyTokenExpiresAt: { type: Date },
+    shopifyRefreshTokenExpiresAt: { type: Date },
+
     // Trial & Usage System
     trialActivated: { type: Boolean, default: false },
     trialStartedAt: { type: Date },

@@ -101,6 +101,10 @@ router.get("/callback", async (req, res) => {
   }
 
   let accessToken;
+  let expires_in;
+  let refresh_token;
+  let refresh_token_expires_in;
+
   try {
     // Exchange code for access token
     const tokenResponse = await axios.post(`https://${shop}/admin/oauth/access_token`, {
@@ -109,6 +113,9 @@ router.get("/callback", async (req, res) => {
       code
     });
     accessToken = tokenResponse.data.access_token;
+    expires_in = tokenResponse.data.expires_in;
+    refresh_token = tokenResponse.data.refresh_token;
+    refresh_token_expires_in = tokenResponse.data.refresh_token_expires_in;
     console.log(`[OAuth] [TOKEN] Successfully exchanged code for ${shop}`);
   } catch (tokenError) {
     // Handle "authorization code was not found or was already used"
@@ -122,6 +129,9 @@ router.get("/callback", async (req, res) => {
     if (existing && existing.shopifyAccessToken) {
       console.log(`[OAuth] RECOVERY: Merchant ${shop} already has a token. Treating simply as re-auth/duplicate request.`);
       accessToken = existing.shopifyAccessToken;
+      refresh_token = existing.shopifyRefreshToken;
+      expires_in = existing.shopifyTokenExpiresAt ? Math.round((new Date(existing.shopifyTokenExpiresAt).getTime() - Date.now()) / 1000) : null;
+      refresh_token_expires_in = existing.shopifyRefreshTokenExpiresAt ? Math.round((new Date(existing.shopifyRefreshTokenExpiresAt).getTime() - Date.now()) / 1000) : null;
     } else {
       // Genuine error - no token exists
       console.error("[OAuth] FATAL: Code invalid and no existing token.");
@@ -150,6 +160,9 @@ router.get("/callback", async (req, res) => {
     const merchantData = {
       shopDomain: shop.toLowerCase(),
       shopifyAccessToken: accessToken,
+      shopifyRefreshToken: refresh_token || null,
+      shopifyTokenExpiresAt: expires_in ? new Date(Date.now() + expires_in * 1000) : null,
+      shopifyRefreshTokenExpiresAt: refresh_token_expires_in ? new Date(Date.now() + refresh_token_expires_in * 1000) : null,
       storeName: shopData?.name || shop,
       contactName: shopData?.shop_owner || null,
       email: shopData?.email || null,
@@ -181,6 +194,13 @@ router.get("/callback", async (req, res) => {
       // Update existing - preserve custom settings, just update token and shop info
       console.log(`[OAuth] Updating existing merchant ${shop}. New Token Length: ${accessToken?.length}`);
       existingMerchant.shopifyAccessToken = accessToken;
+      existingMerchant.shopifyRefreshToken = refresh_token || existingMerchant.shopifyRefreshToken;
+      if (expires_in) {
+        existingMerchant.shopifyTokenExpiresAt = new Date(Date.now() + expires_in * 1000);
+      }
+      if (refresh_token_expires_in) {
+        existingMerchant.shopifyRefreshTokenExpiresAt = new Date(Date.now() + refresh_token_expires_in * 1000);
+      }
       existingMerchant.storeName = shopData?.name || existingMerchant.storeName;
       existingMerchant.email = shopData?.email || existingMerchant.email;
       existingMerchant.phone = shopData?.phone || existingMerchant.phone;

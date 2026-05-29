@@ -3,23 +3,87 @@ import { Merchant } from "../models/Merchant.js";
 
 class ShopifyService {
     /**
+     * Checks if the merchant's token is expiring and refreshes it if necessary.
+     * Returns a valid access token.
+     * @param {Object} merchant - The database Merchant object
+     * @returns {Promise<string>} The active access token
+     */
+    async getValidAccessToken(merchant) {
+        if (!merchant) return null;
+
+        // If the merchant does not have expiring token fields, return current token
+        if (!merchant.shopifyRefreshToken || !merchant.shopifyTokenExpiresAt) {
+            return merchant.shopifyAccessToken;
+        }
+
+        const bufferTime = 10 * 60 * 1000; // 10 minutes buffer
+        const expiresAt = new Date(merchant.shopifyTokenExpiresAt).getTime();
+        const isExpiring = Date.now() + bufferTime >= expiresAt;
+
+        if (!isExpiring) {
+            return merchant.shopifyAccessToken;
+        }
+
+        console.log(`[ShopifyService] Access token for ${merchant.shopDomain} is expiring soon. Refreshing...`);
+
+        try {
+            const response = await axios.post(`https://${merchant.shopDomain}/admin/oauth/access_token`, {
+                client_id: process.env.SHOPIFY_API_KEY,
+                client_secret: process.env.SHOPIFY_API_SECRET,
+                grant_type: "refresh_token",
+                refresh_token: merchant.shopifyRefreshToken
+            });
+
+            const { access_token, expires_in, refresh_token } = response.data;
+
+            merchant.shopifyAccessToken = access_token;
+            merchant.shopifyTokenExpiresAt = new Date(Date.now() + expires_in * 1000);
+            if (refresh_token) {
+                merchant.shopifyRefreshToken = refresh_token;
+            }
+
+            await merchant.save();
+            console.log(`[ShopifyService] Access token refreshed successfully for ${merchant.shopDomain}`);
+            return access_token;
+        } catch (err) {
+            console.error(`[ShopifyService] Failed to refresh access token for ${merchant.shopDomain}:`, err.response?.data || err.message);
+            // Fallback to current access token in case of network issue
+            return merchant.shopifyAccessToken;
+        }
+    }
+
+    /**
+     * Resolves the latest valid token for a merchant.
+     */
+    async resolveActiveToken(shopDomain, accessToken) {
+        if (!shopDomain) return accessToken;
+        try {
+            const merchant = await Merchant.findOne({ shopDomain: { $regex: new RegExp(`^${shopDomain}$`, "i") } });
+            if (merchant) {
+                return await this.getValidAccessToken(merchant);
+            }
+        } catch (err) {
+            console.error(`[ShopifyService] Error resolving active token for ${shopDomain}:`, err.message);
+        }
+        return accessToken;
+    }
+
+    /**
      * Appends a tag to a Shopify order.
-     * @param {string} shopDomain - The shop's domain (e.g., store.myshopify.com)
-     * @param {string} accessToken - The Shopify Admin API access token
-     * @param {string|number} orderId - The ID of the order to update
-     * @param {string} newTag - The tag to add
      */
     async addOrderTag(shopDomain, accessToken, orderId, newTag, extraTagsToRemove = []) {
+        const activeToken = await this.resolveActiveToken(shopDomain, accessToken);
+
         console.log(`[ShopifyService] addOrderTag called with:`, {
             shopDomain,
-            hasAccessToken: !!accessToken,
-            accessTokenLength: accessToken?.length,
+            hasAccessToken: !!activeToken,
+            accessTokenLength: activeToken?.length,
             orderId,
             orderIdType: typeof orderId,
             newTag
         });
 
-        if (!accessToken) {
+        if (!activeToken) {
             console.error(`[ShopifyService] ERROR: No access token for ${shopDomain}, skipping tagging.`);
             return { success: false, error: "Missing access token" };
         }
@@ -32,7 +96,6 @@ class ShopifyService {
         // Ensure orderId is a string number (not a GID)
         let numericOrderId = orderId;
         if (typeof orderId === 'string' && orderId.includes('/')) {
-            // Extract numeric ID from GID format like "gid://shopify/Order/123456"
             numericOrderId = orderId.split('/').pop();
         }
         numericOrderId = String(numericOrderId);
@@ -40,12 +103,9 @@ class ShopifyService {
         try {
             console.log(`[ShopifyService] Adding tag "${newTag}" to order ${numericOrderId} on ${shopDomain}`);
 
-            // 1. Get current tags
             const url = `https://${shopDomain}/admin/api/2024-01/orders/${numericOrderId}.json`;
-            console.log(`[ShopifyService] GET ${url}`);
-
             const getResponse = await axios.get(url, {
-                headers: { "X-Shopify-Access-Token": accessToken }
+                headers: { "X-Shopify-Access-Token": activeToken }
             });
 
             if (!getResponse.data.order) {
@@ -54,8 +114,6 @@ class ShopifyService {
 
             const currentTags = getResponse.data.order.tags || "";
             let tagArray = currentTags.split(",").map(t => t.trim()).filter(t => t);
-
-            console.log(`[ShopifyService] Current tags: "${currentTags}"`);
 
             const defaultStatusTags = [
                 "Pending Order Confirmation",
@@ -72,27 +130,21 @@ class ShopifyService {
             ];
 
             const tagsToRemove = [...new Set([...defaultStatusTags, ...extraTagsToRemove.filter(t => t)])];
-
-            // Remove old status tags
             tagArray = tagArray.filter(tag => !tagsToRemove.includes(tag) || tag === newTag);
 
-            // 3. Add new tag if not already present
             if (!tagArray.includes(newTag)) {
                 tagArray.push(newTag);
             }
 
             const finalTags = tagArray.join(", ");
-            console.log(`[ShopifyService] Final tags to set: "${finalTags}"`);
 
-            // 4. Update order
-            console.log(`[ShopifyService] PUT ${url}`);
             const putResponse = await axios.put(url, {
                 order: {
                     id: numericOrderId,
                     tags: finalTags
                 }
             }, {
-                headers: { "X-Shopify-Access-Token": accessToken }
+                headers: { "X-Shopify-Access-Token": activeToken }
             });
 
             console.log(`[ShopifyService] SUCCESS - Tags updated for order ${numericOrderId}`);
@@ -103,7 +155,6 @@ class ShopifyService {
 
             console.error(`[ShopifyService] ERROR adding tag to order ${numericOrderId}:`, errorDetails);
 
-            // Handle Authentication Errors
             if (status === 401 || status === 403) {
                 await this.handleAuthError(shopDomain, errorDetails);
             }
@@ -137,9 +188,10 @@ class ShopifyService {
      */
     async getOrder(shopDomain, accessToken, orderId) {
         try {
+            const activeToken = await this.resolveActiveToken(shopDomain, accessToken);
             const url = `https://${shopDomain}/admin/api/2024-01/orders/${orderId}.json`;
             const response = await axios.get(url, {
-                headers: { "X-Shopify-Access-Token": accessToken }
+                headers: { "X-Shopify-Access-Token": activeToken }
             });
             return response.data.order;
         } catch (error) {
@@ -158,6 +210,7 @@ class ShopifyService {
      */
     async registerWebhook(shopDomain, accessToken, topic, callbackUrl) {
         try {
+            const activeToken = await this.resolveActiveToken(shopDomain, accessToken);
             const url = `https://${shopDomain}/admin/api/2024-01/webhooks.json`;
             const response = await axios.post(url, {
                 webhook: {
@@ -166,13 +219,12 @@ class ShopifyService {
                     format: "json"
                 }
             }, {
-                headers: { "X-Shopify-Access-Token": accessToken }
+                headers: { "X-Shopify-Access-Token": activeToken }
             });
             console.log(`[ShopifyService] Registered webhook: ${topic}`);
             return { success: true, data: response.data.webhook };
         } catch (error) {
             const status = error.response?.status;
-            // Webhook might already exist
             if (status === 422) {
                 console.log(`[ShopifyService] Webhook ${topic} already exists`);
                 return { success: true, existing: true };
@@ -192,9 +244,10 @@ class ShopifyService {
      */
     async getShopInfo(shopDomain, accessToken) {
         try {
+            const activeToken = await this.resolveActiveToken(shopDomain, accessToken);
             const url = `https://${shopDomain}/admin/api/2023-10/shop.json`;
             const response = await axios.get(url, {
-                headers: { "X-Shopify-Access-Token": accessToken }
+                headers: { "X-Shopify-Access-Token": activeToken }
             });
             return response.data.shop;
         } catch (error) {
@@ -205,10 +258,10 @@ class ShopifyService {
 
     /**
      * Complete auto-setup for a new merchant installation
-     * Registers all required webhooks automatically
      */
     async autoSetupMerchant(shopDomain, accessToken, webhookBaseUrl) {
         console.log(`[ShopifyService] Starting auto-setup for ${shopDomain}...`);
+        const activeToken = await this.resolveActiveToken(shopDomain, accessToken);
 
         const webhooks = [
             { topic: "orders/create", path: "/Api/webhooks/shopify" },
@@ -223,12 +276,11 @@ class ShopifyService {
         const results = [];
         for (const webhook of webhooks) {
             const callbackUrl = `${webhookBaseUrl}${webhook.path}`;
-            const result = await this.registerWebhook(shopDomain, accessToken, webhook.topic, callbackUrl);
+            const result = await this.registerWebhook(shopDomain, activeToken, webhook.topic, callbackUrl);
             results.push({ topic: webhook.topic, ...result });
         }
 
-        // Get shop info to save store name
-        const shopInfo = await this.getShopInfo(shopDomain, accessToken);
+        const shopInfo = await this.getShopInfo(shopDomain, activeToken);
 
         console.log(`[ShopifyService] Auto-setup complete for ${shopDomain}`);
         return {
