@@ -32,38 +32,43 @@ router.post('/create', async (req, res) => {
             return res.json({ confirmationUrl: authUrl });
         }
 
-        // --- SPECIAL HANDLING FOR FREE PLAN ---
-        if (planConfig.price === 0) {
-            console.log(`[Billing] Free plan selected. Skipping Shopify charge.`);
-            merchant.plan = planId;
-            merchant.billingStatus = 'active';
-            merchant.shopifySubscriptionId = null;
-            await merchant.save();
-
-            // If merchant has no token yet, redirect to OAuth to get it
-            if (!merchant.shopifyAccessToken) {
-                console.log(`[Billing] Free plan activated but NO TOKEN for ${shop}. Redirecting to OAuth.`);
-                const authUrl = `${SHOPIFY_APP_URL}/Api/auth/shopify?shop=${shop}`;
-                return res.json({ confirmationUrl: authUrl });
-            }
-
-            // Normal flow - merchant has token, go to billing success
-            const shopName = shop.replace(".myshopify.com", "");
-            if (SHOPIFY_API_KEY) {
-                return res.json({ confirmationUrl: `https://admin.shopify.com/store/${shopName}/apps/${SHOPIFY_API_KEY}/billing-success?shop=${shop}` });
-            }
-            const frontendUrl = process.env.FRONTEND_APP_URL || "https://whatomatic.vercel.app";
-            return res.json({ confirmationUrl: `${frontendUrl}/billing-success?shop=${shop}` });
-        }
-
-        // --- PAID PLAN: Use GraphQL appSubscriptionCreate ---
+        // --- ALL PLANS NOW GO THROUGH SHOPIFY BILLING ---
         if (!merchant.shopifyAccessToken) {
-            console.error(`[Billing] Access token missing for ${shop}`);
-            return res.status(403).json({ message: 'Shopify token missing. Please reinstall the app.' });
+            console.warn(`[Billing] Token missing for ${shop}. Redirecting to OAuth.`);
+            const authUrl = `${SHOPIFY_APP_URL}/Api/auth/shopify?shop=${shop}`;
+            return res.json({ confirmationUrl: authUrl });
         }
 
         // Build the return URL for after Shopify approval
         const returnUrl = `${SHOPIFY_APP_URL}/api/billing/confirm?shop=${shop}&plan=${planId}`;
+
+        // Construct line items dynamically
+        let lineItems = [];
+
+        // If the plan has a base recurring price, add it
+        if (planConfig.price > 0) {
+            lineItems.push({
+                plan: {
+                    appRecurringPricingDetails: {
+                        price: {
+                            amount: planConfig.price,
+                            currencyCode: (planConfig.currency || 'USD').toUpperCase()
+                        },
+                        interval: "EVERY_30_DAYS"
+                    }
+                }
+            });
+        }
+
+        // Add Usage Pricing for auto-upgrades (chunk charging)
+        lineItems.push({
+            plan: {
+                appUsagePricingDetails: {
+                    cappedAmount: { amount: 15.0, currencyCode: "USD" },
+                    terms: "Up to 50 free messages. Auto-upgrades to Starter ($4.99) after 50 messages, Growth ($9.99) after 1250, and Professional ($14.99) after 2500."
+                }
+            }
+        });
 
         // GraphQL mutation for appSubscriptionCreate
         const graphqlQuery = {
@@ -93,19 +98,7 @@ router.post('/create', async (req, res) => {
                 returnUrl: returnUrl,
                 test: process.env.SHOPIFY_BILLING_TEST === 'true',
                 trialDays: planConfig.trialDays && planConfig.trialDays > 0 ? planConfig.trialDays : null,
-                lineItems: [
-                    {
-                        plan: {
-                            appRecurringPricingDetails: {
-                                price: {
-                                    amount: planConfig.price,
-                                    currencyCode: (planConfig.currency || 'USD').toUpperCase()
-                                },
-                                interval: "EVERY_30_DAYS"
-                            }
-                        }
-                    }
-                ]
+                lineItems: lineItems
             }
         };
 
@@ -188,6 +181,20 @@ router.get('/confirm', async (req, res) => {
                                     id
                                     status
                                     name
+                                    lineItems(first: 5) {
+                                        edges {
+                                            node {
+                                                id
+                                                plan {
+                                                    pricingDetails {
+                                                        ... on AppUsagePricing {
+                                                            terms
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -210,6 +217,14 @@ router.get('/confirm', async (req, res) => {
 
                 if (subscription?.status === 'ACTIVE') {
                     console.log(`[Billing] ✅ Subscription ACTIVE for ${shop}`);
+
+                    // Extract the usage line item ID
+                    const lineItems = subscription.lineItems?.edges || [];
+                    const usageLineItem = lineItems.find(edge => edge.node.plan?.pricingDetails?.terms);
+                    if (usageLineItem) {
+                        merchant.shopifyUsageLineItemId = usageLineItem.node.id;
+                        console.log(`[Billing] Found usage line item ID: ${usageLineItem.node.id}`);
+                    }
                 } else if (subscription?.status === 'DECLINED') {
                     console.log(`[Billing] ❌ Subscription DECLINED by ${shop}`);
                     return res.redirect(getBillingRedirectUrl(shop, 'declined'));
@@ -309,7 +324,8 @@ router.get('/status', async (req, res) => {
             status: merchant.billingStatus || 'none',
             usage: merchant.usage || 0,
             limit: limit,
-            isNewlyInstalled: newlyInstalled
+            isNewlyInstalled: newlyInstalled,
+            hasUsagePlan: !!merchant.shopifyUsageLineItemId
         });
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch status' });

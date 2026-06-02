@@ -527,17 +527,21 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     const currentUsage = updatedMerchant.usage || 0;
 
                     if (currentUsage >= currentLimit) {
-                        console.warn(`[ShopifyWebhook] Message limit reached for ${shopDomain} (Plan: ${updatedMerchant.plan}). Message blocked.`);
-                        if (activity) {
-                            activity.type = 'failed';
-                            activity.message = `Limit Reached (${currentLimit} messages) 🛑`;
-                            await activity.save();
-                        }
+                        if (updatedMerchant.shopifyUsageLineItemId && updatedMerchant.plan !== 'pro') {
+                            console.log(`[ShopifyWebhook] Auto-upgrade allowance for ${shopDomain}. Limit was ${currentLimit}.`);
+                        } else {
+                            console.warn(`[ShopifyWebhook] Message limit reached for ${shopDomain} (Plan: ${updatedMerchant.plan}). Message blocked.`);
+                            if (activity) {
+                                activity.type = 'failed';
+                                activity.message = `Limit Reached (${currentLimit} messages) 🛑`;
+                                await activity.save();
+                            }
 
-                        if (updatedMerchant?.shopifyAccessToken) {
-                            await shopifyService.addOrderTag(shopDomain, updatedMerchant.shopifyAccessToken, orderId, "⚠️ Limit Reached");
+                            if (updatedMerchant?.shopifyAccessToken) {
+                                await shopifyService.addOrderTag(shopDomain, updatedMerchant.shopifyAccessToken, orderId, "⚠️ Limit Reached");
+                            }
+                            return;
                         }
-                        return;
                     }
 
                     let result;
@@ -556,8 +560,11 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     console.log(`[ShopifyWebhook] WhatsApp send result:`, result);
 
                     if (result && result.success) {
-                        // Increment usage for all plans
-                        await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: updatedMerchant.plan === 'trial' ? 1 : 0 } });
+                        // Increment usage for all plans and check billing
+                        const incMerchant = await Merchant.findOneAndUpdate({ shopDomain }, { $inc: { usage: 1, trialUsage: updatedMerchant.plan === 'trial' ? 1 : 0 } }, { new: true });
+                        import('../../services/billingService.js').then(({ checkAndChargeUsage }) => {
+                            checkAndChargeUsage(incMerchant);
+                        }).catch(err => console.error("Billing service error:", err));
 
                         await automationService.trackSent(shopDomain, "order-confirmation");
 
@@ -712,8 +719,12 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
                     const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
                     if ((merchant.usage || 0) >= currentLimit) {
-                        console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Abandoned Cart blocked)`);
-                        return;
+                        if (merchant.shopifyUsageLineItemId && merchant.plan !== 'pro') {
+                            console.log(`[ShopifyWebhook] Auto-upgrade allowance for abandoned cart ${shopDomain}.`);
+                        } else {
+                            console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Abandoned Cart blocked)`);
+                            return;
+                        }
                     }
 
                     let result;
@@ -730,7 +741,10 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     }
 
                     if (result?.success) {
-                        await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
+                        const incMerchant = await Merchant.findOneAndUpdate({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } }, { new: true });
+                        import('../../services/billingService.js').then(({ checkAndChargeUsage }) => {
+                            checkAndChargeUsage(incMerchant);
+                        }).catch(err => console.error("Billing service error:", err));
                         await automationService.trackSent(shopDomain, "abandoned_cart");
                     }
                 }
@@ -777,8 +791,12 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
                 const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
                 if ((merchant.usage || 0) >= currentLimit) {
-                    console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment ${targetType} blocked)`);
-                    return;
+                    if (merchant.shopifyUsageLineItemId && merchant.plan !== 'pro') {
+                        console.log(`[ShopifyWebhook] Auto-upgrade allowance for fulfillment ${targetType} ${shopDomain}.`);
+                    } else {
+                        console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment ${targetType} blocked)`);
+                        return;
+                    }
                 }
 
                 let fulfillmentMsg = template.message;
@@ -793,7 +811,10 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 const result = template.isPoll ? await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, fulfillmentMsg, template.pollOptions, orderId) : await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, fulfillmentMsg);
 
                 if (result?.success) {
-                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } });
+                    const incMerchant = await Merchant.findOneAndUpdate({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } }, { new: true });
+                    import('../../services/billingService.js').then(({ checkAndChargeUsage }) => {
+                        checkAndChargeUsage(incMerchant);
+                    }).catch(err => console.error("Billing service error:", err));
                     await automationService.trackSent(shopDomain, automationType);
                 }
             } catch (err) {

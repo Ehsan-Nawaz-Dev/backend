@@ -112,10 +112,16 @@ router.post("/send", async (req, res) => {
                 const currentLimit = baseLimit + Math.max(0, (merchant.trialLimit || 10) - 10);
                 const currentUsage = merchant.usage || 0;
                 if (currentUsage >= currentLimit) {
-                    return res.status(403).json({
-                        success: false,
-                        error: `Plan limit reached (${currentLimit} messages max). Please upgrade to a paid plan.`
-                    });
+                    // Bypass hard-stop if they have a usage line item (auto-upgrades enabled)
+                    // unless they are already at the absolute highest plan.
+                    if (merchant.shopifyUsageLineItemId && merchant.plan !== 'pro') {
+                        console.log(`[WhatsApp] Auto-upgrade allowance for ${shopDomain}. Limit was ${currentLimit}.`);
+                    } else {
+                        return res.status(403).json({
+                            success: false,
+                            error: `Plan limit reached (${currentLimit} messages max). Please upgrade to a paid plan.`
+                        });
+                    }
                 }
             }
         }
@@ -128,12 +134,15 @@ router.post("/send", async (req, res) => {
         }
 
         if (result.success) {
-            // Increment usage
+            // Increment usage and trigger billing check
             if (merchant) {
                 if (merchant.plan === 'trial') {
-                    await Merchant.updateOne({ shopDomain }, { $inc: { trialUsage: 1 } });
+                    await Merchant.findOneAndUpdate({ shopDomain }, { $inc: { trialUsage: 1 } });
                 } else {
-                    await Merchant.updateOne({ shopDomain }, { $inc: { usage: 1 } });
+                    const updatedMerchant = await Merchant.findOneAndUpdate({ shopDomain }, { $inc: { usage: 1 } }, { new: true });
+                    import('../services/billingService.js').then(({ checkAndChargeUsage }) => {
+                        checkAndChargeUsage(updatedMerchant);
+                    }).catch(err => console.error("Billing service error:", err));
                 }
             }
 
