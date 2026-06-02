@@ -51,8 +51,11 @@ router.post("/send", async (req, res) => {
 // GET /api/campaigns/status/:id
 router.get("/status/:id", async (req, res) => {
     try {
-        const campaign = await Campaign.findById(req.params.id);
-        if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+        const shopDomain = getShopDomain(req);
+        if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
+
+        const campaign = await Campaign.findOne({ _id: req.params.id, shopDomain });
+        if (!campaign) return res.status(404).json({ error: "Campaign not found or unauthorized" });
 
         res.json({
             id: campaign._id,

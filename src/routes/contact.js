@@ -75,11 +75,16 @@ router.post("/", async (req, res) => {
 // PUT /api/contact/:id - Update contact
 router.put("/:id", async (req, res) => {
   try {
-    const contact = await Contact.findByIdAndUpdate(
-      req.params.id,
+    const merchant = await getMerchant(req);
+    if (!merchant) return res.status(400).json({ error: "Invalid shop" });
+
+    const contact = await Contact.findOneAndUpdate(
+      { _id: req.params.id, merchant: merchant._id },
       { $set: req.body },
       { new: true }
     );
+    if (!contact) return res.status(404).json({ error: "Contact not found or unauthorized" });
+
     res.json({ ...contact.toObject(), id: contact._id });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
@@ -89,7 +94,12 @@ router.put("/:id", async (req, res) => {
 // DELETE /api/contact/:id - Delete contact
 router.delete("/:id", async (req, res) => {
   try {
-    await Contact.findByIdAndDelete(req.params.id);
+    const merchant = await getMerchant(req);
+    if (!merchant) return res.status(400).json({ error: "Invalid shop" });
+
+    const contact = await Contact.findOneAndDelete({ _id: req.params.id, merchant: merchant._id });
+    if (!contact) return res.status(404).json({ error: "Contact not found or unauthorized" });
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });

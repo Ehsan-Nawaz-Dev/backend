@@ -7,10 +7,10 @@ import { AutomationStat } from "../models/AutomationStat.js";
 
 const router = Router();
 
-// GET /api/diagnostics?shop=YOUR_SHOP.myshopify.com
+// GET /api/diagnostics
 router.get("/", async (req, res) => {
     try {
-        const { shop } = req.query;
+        const shop = req.shopifyShop || req.query.shop;
 
         if (!shop) {
             return res.status(400).json({ error: "Missing shop parameter" });

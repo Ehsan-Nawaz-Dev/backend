@@ -175,8 +175,14 @@ router.post("/", async (req, res) => {
 // PUT /api/templates/:id
 router.put("/:id", async (req, res) => {
   try {
-    const template = await Template.findByIdAndUpdate(
-      req.params.id,
+    const shopDomain = getShopDomain(req);
+    if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
+
+    const merchant = await Merchant.findOne({ shopDomain });
+    if (!merchant) return res.status(404).json({ error: "Merchant not found" });
+
+    const template = await Template.findOneAndUpdate(
+      { _id: req.params.id, merchant: merchant._id },
       {
         name: req.body.name,
         event: req.body.event,
@@ -189,7 +195,7 @@ router.put("/:id", async (req, res) => {
       { new: true },
     );
 
-    if (!template) return res.status(404).json({ error: "Template not found" });
+    if (!template) return res.status(404).json({ error: "Template not found or unauthorized" });
 
     res.json(template);
   } catch (err) {
@@ -201,8 +207,14 @@ router.put("/:id", async (req, res) => {
 // DELETE /api/templates/:id
 router.delete("/:id", async (req, res) => {
   try {
-    const template = await Template.findByIdAndDelete(req.params.id);
-    if (!template) return res.status(404).json({ error: "Template not found" });
+    const shopDomain = getShopDomain(req);
+    if (!shopDomain) return res.status(400).json({ error: "Missing shop parameter" });
+
+    const merchant = await Merchant.findOne({ shopDomain });
+    if (!merchant) return res.status(404).json({ error: "Merchant not found" });
+
+    const template = await Template.findOneAndDelete({ _id: req.params.id, merchant: merchant._id });
+    if (!template) return res.status(404).json({ error: "Template not found or unauthorized" });
 
     res.json({ success: true });
   } catch (err) {

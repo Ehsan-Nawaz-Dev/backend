@@ -271,7 +271,7 @@ router.delete("/merchants/:shopDomain", async (req, res) => {
 
         // 2. Delete WhatsApp Session & Auth
         await WhatsAppSession.deleteOne({ shopDomain });
-        await WhatsAppAuth.deleteOne({ shopDomain });
+        await WhatsAppAuth.deleteMany({ shopDomain });
 
         // 3. Delete based on merchant ID (if found)
         if (merchantId) {
