@@ -14,7 +14,7 @@ export async function checkAndChargeUsage(merchant) {
 
     if (currentUsage > 2500) {
         targetCharge = 14.99;
-        targetPlan = 'pro';
+        targetPlan = 'professional';
     } else if (currentUsage > 1250) {
         targetCharge = 9.99;
         targetPlan = 'growth';

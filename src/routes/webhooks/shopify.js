@@ -534,7 +534,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     const currentUsage = updatedMerchant.usage || 0;
 
                     if (currentUsage >= currentLimit) {
-                        if (updatedMerchant.shopifyUsageLineItemId && updatedMerchant.plan !== 'pro') {
+                        if (updatedMerchant.shopifyUsageLineItemId && updatedMerchant.plan !== 'professional') {
                             console.log(`[ShopifyWebhook] Auto-upgrade allowance for ${shopDomain}. Limit was ${currentLimit}.`);
                         } else {
                             console.warn(`[ShopifyWebhook] Message limit reached for ${shopDomain} (Plan: ${updatedMerchant.plan}). Message blocked.`);
@@ -726,7 +726,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
                     const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
                     if ((merchant.usage || 0) >= currentLimit) {
-                        if (merchant.shopifyUsageLineItemId && merchant.plan !== 'pro') {
+                        if (merchant.shopifyUsageLineItemId && merchant.plan !== 'professional') {
                             console.log(`[ShopifyWebhook] Auto-upgrade allowance for abandoned cart ${shopDomain}.`);
                         } else {
                             console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Abandoned Cart blocked)`);
@@ -798,7 +798,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
                 const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
                 if ((merchant.usage || 0) >= currentLimit) {
-                    if (merchant.shopifyUsageLineItemId && merchant.plan !== 'pro') {
+                    if (merchant.shopifyUsageLineItemId && merchant.plan !== 'professional') {
                         console.log(`[ShopifyWebhook] Auto-upgrade allowance for fulfillment ${targetType} ${shopDomain}.`);
                     } else {
                         console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Fulfillment ${targetType} blocked)`);

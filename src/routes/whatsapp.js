@@ -116,7 +116,7 @@ router.post("/send", async (req, res) => {
                 if (currentUsage >= currentLimit) {
                     // Bypass hard-stop if they have a usage line item (auto-upgrades enabled)
                     // unless they are already at the absolute highest plan.
-                    if (merchant.shopifyUsageLineItemId && merchant.plan !== 'pro') {
+                    if (merchant.shopifyUsageLineItemId && merchant.plan !== 'professional') {
                         console.log(`[WhatsApp] Auto-upgrade allowance for ${shopDomain}. Limit was ${currentLimit}.`);
                     } else {
                         return res.status(403).json({

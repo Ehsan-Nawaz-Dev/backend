@@ -14,7 +14,7 @@ export const plans = {
         price: 9.99,
         messageLimit: 2500
     },
-    pro: {
+    professional: {
         name: "Professional",
         price: 14.99,
         messageLimit: 4250
