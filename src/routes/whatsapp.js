@@ -2,6 +2,7 @@ import { Router } from "express";
 import { whatsappService } from "../services/whatsappService.js";
 import { Merchant } from "../models/Merchant.js";
 import { Plan } from "../models/Plan.js";
+import { checkAndResetBillingCycle } from "../services/billingService.js";
 
 const router = Router();
 
@@ -97,8 +98,9 @@ router.post("/send", async (req, res) => {
             return res.status(400).json({ error: "Missing phoneNumber or message" });
         }
 
-        const merchant = await Merchant.findOne({ shopDomain });
+        let merchant = await Merchant.findOne({ shopDomain });
         if (merchant) {
+            merchant = await checkAndResetBillingCycle(merchant);
             if (merchant.plan === 'trial') {
                 if (merchant.trialUsage >= (merchant.trialLimit || 10)) {
                     return res.status(403).json({

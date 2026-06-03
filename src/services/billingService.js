@@ -79,3 +79,40 @@ export async function checkAndChargeUsage(merchant) {
         }
     }
 }
+
+export async function checkAndResetBillingCycle(merchant) {
+    const now = new Date();
+    
+    // Initialize billingCycleEnd for merchants if missing
+    if (!merchant.billingCycleEnd) {
+        const anchor = merchant.installedAt || merchant.createdAt || now;
+        let cycleEnd = new Date(anchor);
+        while (cycleEnd <= now) {
+            cycleEnd.setDate(cycleEnd.getDate() + 30);
+        }
+        merchant.billingCycleEnd = cycleEnd;
+        if (!merchant.basePlan) {
+            merchant.basePlan = merchant.plan || 'free';
+        }
+        await merchant.save();
+        console.log(`[Billing] Initialized billingCycleEnd for ${merchant.shopDomain} to ${cycleEnd.toISOString()}`);
+    }
+
+    if (now > merchant.billingCycleEnd) {
+        console.log(`[Billing] Billing cycle ended for ${merchant.shopDomain}. Resetting usage stats...`);
+        merchant.usage = 0;
+        merchant.usageChargeTotal = 0;
+        merchant.plan = merchant.basePlan || 'free';
+        
+        let newEnd = new Date(merchant.billingCycleEnd);
+        while (newEnd <= now) {
+            newEnd.setDate(newEnd.getDate() + 30);
+        }
+        merchant.billingCycleEnd = newEnd;
+        await merchant.save();
+        console.log(`[Billing] Cycle reset completed for ${merchant.shopDomain}. Next cycle ends: ${newEnd.toISOString()}`);
+    }
+    
+    return merchant;
+}
+

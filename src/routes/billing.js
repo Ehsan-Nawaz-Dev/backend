@@ -2,6 +2,7 @@ import { Router } from 'express';
 import axios from 'axios';
 import { Merchant } from '../models/Merchant.js';
 import { Plan } from '../models/Plan.js';
+import { checkAndResetBillingCycle } from '../services/billingService.js';
 
 const router = Router();
 const SHOPIFY_APP_URL = (process.env.SHOPIFY_APP_URL || "http://localhost:5000").replace(/\/$/, "");
@@ -251,9 +252,13 @@ router.get('/confirm', async (req, res) => {
 
         // Update DB
         merchant.plan = plan;
+        merchant.basePlan = plan;
         merchant.billingStatus = 'active';
+        merchant.usage = 0;
+        merchant.usageChargeTotal = 0;
+        merchant.billingCycleEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
         await merchant.save();
-        console.log(`[Billing] ✅ Plan '${plan}' activated for ${shop}`);
+        console.log(`[Billing] ✅ Plan '${plan}' activated for ${shop}. Billing cycle ends at: ${merchant.billingCycleEnd.toISOString()}`);
 
         // Redirect to billing success page
         res.redirect(getBillingRedirectUrl(shop, 'success'));
@@ -270,7 +275,7 @@ router.get('/confirm', async (req, res) => {
 router.get('/status', async (req, res) => {
     const shop = req.shopifyShop || req.query.shop;
     try {
-        const merchant = await Merchant.findOne({
+        let merchant = await Merchant.findOne({
             shopDomain: { $regex: new RegExp(`^${shop}$`, "i") }
         });
 
@@ -278,6 +283,9 @@ router.get('/status', async (req, res) => {
             console.log(`[Billing] Status requested for unknown shop: ${shop}`);
             return res.json({ plan: 'none', status: 'none', usage: 0, limit: 10 });
         }
+
+        // Reset billing cycle if 30 days have elapsed
+        merchant = await checkAndResetBillingCycle(merchant);
 
         // If merchant has an active plan (free or trial), allow through even without token
         // Token is only strictly needed for paid Shopify subscription plans

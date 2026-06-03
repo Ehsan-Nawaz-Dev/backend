@@ -18,6 +18,7 @@ import { AutomationStat } from "../../models/AutomationStat.js";
 import { Campaign } from "../../models/Campaign.js";
 import { ChatButtonSettings } from "../../models/ChatButtonSettings.js";
 import { PollMessage } from "../../models/PollMessage.js";
+import { checkAndResetBillingCycle } from "../../services/billingService.js";
 
 const router = Router();
 
@@ -206,11 +207,14 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
         return res.status(200).send("ok");
     }
 
-    const merchant = await Merchant.findOne({ shopDomain });
+    let merchant = await Merchant.findOne({ shopDomain });
     if (!merchant) {
         console.warn(`No merchant found for shop: ${shopDomain}`);
         return res.status(200).send("ok");
     }
+
+    // Reset billing cycle if 30 days have elapsed
+    merchant = await checkAndResetBillingCycle(merchant);
 
     const body = req.body;
     const order = body.order || body; // Handle Shopify nesting
@@ -440,7 +444,10 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                         return;
                     }
 
-                    const updatedMerchant = await Merchant.findOne({ shopDomain });
+                    let updatedMerchant = await Merchant.findOne({ shopDomain });
+                    if (updatedMerchant) {
+                        updatedMerchant = await checkAndResetBillingCycle(updatedMerchant);
+                    }
                     console.log(`[ShopifyWebhook] Merchant found. Has accessToken: ${!!updatedMerchant?.shopifyAccessToken}, Token length: ${updatedMerchant?.shopifyAccessToken?.length || 0}`);
 
                     // NEW: WhatsApp Presence Check
