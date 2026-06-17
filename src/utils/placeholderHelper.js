@@ -83,6 +83,7 @@ export const replacePlaceholders = (template, data) => {
         "{{order_number}}": order.name || order.order_number || `#${order.id || order.order_id}`,
         "{{customer_name}}": resolvedCustomerName,
         "{{order_id}}": (order.id || order.order_id)?.toString() || "",
+        "{{cart_link}}": order.abandoned_checkout_url || order.checkout_url || "",
 
         // Price placeholders
         "{{grand_total}}": `${currency} ${price}`.trim(),
