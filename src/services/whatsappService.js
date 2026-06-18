@@ -1291,6 +1291,29 @@ class WhatsAppService {
     }
 
     /**
+     * Checks if the active socket connection is responsive.
+     */
+    async isSocketHealthy(shopDomain, timeoutMs = 3000) {
+        const sock = this.sockets.get(shopDomain);
+        if (!sock || !sock.user || !sock.user.id) return false;
+
+        try {
+            const testNum = sock.user.id.split(':')[0];
+            const pingPromise = sock.onWhatsApp(`${testNum}@s.whatsapp.net`);
+
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error("Socket ping timed out")), timeoutMs)
+            );
+
+            await Promise.race([pingPromise, timeoutPromise]);
+            return true;
+        } catch (err) {
+            console.warn(`[WhatsApp] Socket health check failed for ${shopDomain}:`, err.message);
+            return false;
+        }
+    }
+
+    /**
      * Checks if a phone number exists on WhatsApp.
      */
     async checkWhatsApp(shopDomain, phoneNumber) {
@@ -1323,14 +1346,19 @@ class WhatsAppService {
                 return { success: false, error: "Daily safety limit reached for this number. Wait 24 hours or switch to WhatsApp Cloud API for unlimited sending." };
             }
 
-            // 2. Socket Readiness
+            // 2. Socket Readiness and Health check
             let sock = this.sockets.get(shopDomain);
             if (!sock || !sock.user) {
                 console.log(`[WhatsApp] Socket not ready for ${shopDomain}, waiting...`);
                 sock = await this.waitForSocket(shopDomain, 10000); // 10s wait
             }
 
-            if (!sock || !sock.user) {
+            let isHealthy = false;
+            if (sock && sock.user) {
+                isHealthy = await this.isSocketHealthy(shopDomain);
+            }
+
+            if (!isHealthy) {
                 if (retryCount < 2) {
                     // Only auto-reconnect if NOT explicitly disconnected
                     const session = await WhatsAppSession.findOne({ shopDomain });
@@ -1423,29 +1451,30 @@ class WhatsAppService {
                 return { success: false, error: "Operation blocked: Account is inactive." };
             }
 
-            const sock = this.sockets.get(shopDomain);
+            // Socket Readiness and Health check
+            let sock = this.sockets.get(shopDomain);
+            let isHealthy = false;
+            if (sock && sock.user) {
+                isHealthy = await this.isSocketHealthy(shopDomain);
+            }
 
-            if (!sock) {
-                // Try to reconnect if no socket
+            if (!isHealthy) {
                 if (retryCount < 1) {
-                    console.log(`[WhatsApp] No socket for poll, attempting to reconnect...`);
+                    console.log(`[WhatsApp] Socket not ready or hung for poll. Attempting to reconnect...`);
+                    // Clear stale socket before re-init
+                    const staleSock = this.sockets.get(shopDomain);
+                    if (staleSock) {
+                        staleSock.ev?.removeAllListeners();
+                        try { staleSock.end(); } catch (e) { /* ignore */ }
+                        this.sockets.delete(shopDomain);
+                    }
+                    this.connectionAlive.set(shopDomain, false);
+                    this.pendingInits.delete(shopDomain);
                     await this.initializeClient(shopDomain);
                     await WhatsAppService.delay(5000);
                     return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, orderId, retryCount + 1);
                 }
-                console.error(`[WhatsApp] No socket found for ${shopDomain}. Available sockets: ${Array.from(this.sockets.keys()).join(", ") || "none"}`);
-                return { success: false, error: "WhatsApp not connected - no socket" };
-            }
-
-            if (!sock.user) {
-                // Wait a bit if connection is initializing
-                if (retryCount < 1) {
-                    console.log(`[WhatsApp] Socket exists but not authenticated for poll, waiting...`);
-                    await WhatsAppService.delay(5000);
-                    return this.sendPoll(shopDomain, phoneNumber, pollName, pollOptions, orderId, retryCount + 1);
-                }
-                console.error(`[WhatsApp] Socket exists but no user for ${shopDomain}. Connection might be initializing.`);
-                return { success: false, error: "WhatsApp not connected - not authenticated" };
+                return { success: false, error: "WhatsApp connection hung or not authenticated" };
             }
 
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
