@@ -564,7 +564,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                         }
                     }
 
-                    let customerMsg = customerTemplate?.message || `Hi {{first_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
+                    let customerMsg = customerTemplate?.message || `Hi {{customer_name}}, your order {{order_number}} has been received! We'll notify you when it ships.`;
 
                     // Replace Placeholders using the FULL order data from API
                     console.log(`[ShopifyWebhook] Replacing placeholders in message for order ${orderId}`);
