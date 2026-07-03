@@ -26,6 +26,15 @@ async function seedMissingTemplates(merchant, shopDomain) {
       },
       {
         merchant: merchant._id,
+        name: "Bank Transfer Confirmation",
+        event: "orders/create/bank_transfer",
+        message: `🏦 *Bank Transfer Instructions!*\n\nHi {{customer_name}},\n\nThank you for your order *{{order_number}}*. 🛍️\n\nTo complete your order, please transfer *{{grand_total}}* to our bank account:\n\n*Bank:* [Bank Name]\n*Account Title:* [Account Title]\n*Account/IBAN:* [Account Number]\n\nOnce transferred, please reply to this message with a screenshot/receipt of the transfer so we can confirm your order immediately! 📲\n\nThank you!\n- {{store_name}} Team`,
+        enabled: false,
+        isPoll: false,
+        pollOptions: []
+      },
+      {
+        merchant: merchant._id,
         name: "Order Cancelled",
         event: "orders/cancelled",
         message: `Hi {{customer_name}},\n\nYour order {{order_number}} has been cancelled.\n\nIf this was a mistake, please contact us.\n\nThank you for shopping with {{store_name}}!`,
@@ -101,6 +110,7 @@ async function seedMissingTemplates(merchant, shopDomain) {
 
     const defaultAutomations = [
       { shopDomain: shopDomain, type: "order-confirmation", enabled: true },
+      { shopDomain: shopDomain, type: "bank-transfer-confirmation", enabled: false },
       { shopDomain: shopDomain, type: "abandoned_cart", enabled: false },
       { shopDomain: shopDomain, type: "fulfillment_update", enabled: false },
       { shopDomain: shopDomain, type: "fulfillment_delivered", enabled: false },

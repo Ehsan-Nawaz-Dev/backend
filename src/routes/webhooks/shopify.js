@@ -432,8 +432,9 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 }
 
                 // Trigger 2: Customer Confirmation (Customer is notified IMMEDIATELY)
-                const customerSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
-                if (customerSetting?.enabled) {
+                const orderConfirmationSetting = await AutomationSetting.findOne({ shopDomain, type: "order-confirmation" });
+                const bankTransferSetting = await AutomationSetting.findOne({ shopDomain, type: "bank-transfer-confirmation" }) || orderConfirmationSetting;
+                if (orderConfirmationSetting?.enabled || bankTransferSetting?.enabled) {
                     if (!customerPhoneFormatted) {
                         // If no phone, we update log and finish (don't throw error to catch-all)
                         if (activity) {
@@ -506,12 +507,34 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
                     let customerTemplate = null;
                     if (isBankTransfer) {
+                        // Check if bank transfer automation is enabled
+                        if (!bankTransferSetting?.enabled) {
+                            console.log(`[ShopifyWebhook] Skipping bank transfer confirmation for ${orderId}: automation is disabled`);
+                            if (activity) {
+                                activity.type = 'confirmed';
+                                activity.message = 'Skipped: Bank Transfer Automation is disabled 🛑';
+                                await activity.save();
+                            }
+                            return;
+                        }
+
                         console.log(`[ShopifyWebhook] Order ${orderId} detected as Bank Transfer. Checking for specific template...`);
                         customerTemplate = await Template.findOne({ 
                             merchant: updatedMerchant?._id, 
                             event: "orders/create/bank_transfer",
                             enabled: true 
                         });
+                    } else {
+                        // Check if order confirmation automation is enabled
+                        if (!orderConfirmationSetting?.enabled) {
+                            console.log(`[ShopifyWebhook] Skipping order confirmation for ${orderId}: automation is disabled`);
+                            if (activity) {
+                                activity.type = 'confirmed';
+                                activity.message = 'Skipped: Order Confirmation Automation is disabled 🛑';
+                                await activity.save();
+                            }
+                            return;
+                        }
                     }
 
                     if (!customerTemplate) {

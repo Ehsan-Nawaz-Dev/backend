@@ -70,18 +70,34 @@ export const replacePlaceholders = (template, data) => {
     };
     const resolvedCustomerName = getCustomerName();
 
+    // Extract customer first name
+    const getCustomerFirstName = () => {
+        const firstName = order.shipping_address?.first_name || 
+                          order.billing_address?.first_name || 
+                          order.customer?.first_name;
+        if (firstName) {
+            return firstName.trim();
+        }
+        // Fallback to splitting resolvedCustomerName by space
+        return resolvedCustomerName.split(" ")[0] || "Customer";
+    };
+    const resolvedCustomerFirstName = getCustomerFirstName();
+
     console.log(`[PlaceholderHelper] Extracted values:`, {
         address,
         city,
         price,
         currency,
-        customerName: resolvedCustomerName
+        customerName: resolvedCustomerName,
+        customerFirstName: resolvedCustomerFirstName
     });
 
     const placeholders = {
         "{{store_name}}": merchant?.storeName || merchant?.shopDomain || "",
         "{{order_number}}": order.name || order.order_number || `#${order.id || order.order_id}`,
         "{{customer_name}}": resolvedCustomerName,
+        "{{first_name}}": resolvedCustomerFirstName,
+        "{{customer_first_name}}": resolvedCustomerFirstName,
         "{{order_id}}": (order.id || order.order_id)?.toString() || "",
         "{{cart_link}}": order.abandoned_checkout_url || order.checkout_url || "",
 
