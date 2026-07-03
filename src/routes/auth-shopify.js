@@ -281,7 +281,7 @@ async function seedMerchantData(merchant) {
       merchant: merchant._id,
       name: "Order Confirmation",
       event: "orders/create",
-      message: `Hi {{customer_name}}! 👋\n\nThank you for your order from {{store_name}}!\n\n📦 *Order:* {{order_number}}\n🛒 *Items:* {{items_list}}\n💰 *Total:* {{grand_total}}\n📍 *Address:* {{address}}, {{city}}\n\nPlease confirm if these details are correct.`,
+      message: `Hi {{first_name}}! 👋\n\nThank you for your order from {{store_name}}!\n\n📦 *Order:* {{order_number}}\n🛒 *Items:* {{items_list}}\n💰 *Total:* {{grand_total}}\n📍 *Address:* {{address}}, {{city}}\n\nPlease confirm if these details are correct.`,
       enabled: true,
       isPoll: true,
       pollOptions: ["✅ Yes, Confirm", "❌ No, Cancel"]
@@ -290,7 +290,7 @@ async function seedMerchantData(merchant) {
       merchant: merchant._id,
       name: "Order Cancelled",
       event: "orders/cancelled",
-      message: `Hi {{customer_name}},\n\nYour order {{order_number}} has been cancelled.\n\nIf this was a mistake, please contact us.\n\nThank you for shopping with {{store_name}}!`,
+      message: `Hi {{first_name}},\n\nYour order {{order_number}} has been cancelled.\n\nIf this was a mistake, please contact us.\n\nThank you for shopping with {{store_name}}!`,
       enabled: false,
       isPoll: false
     },
@@ -298,7 +298,7 @@ async function seedMerchantData(merchant) {
       merchant: merchant._id,
       name: "Shipment Update",
       event: "fulfillments/update",
-      message: `Hi {{customer_name}}! 🚚\n\nGreat news! Your order {{order_number}} has been shipped via {{courier}}!\n\n📦 Tracking Number: {{tracking_number}}\n📍 Track your package: {{tracking_link}}\n\nThank you for shopping with {{store_name}}!`,
+      message: `Hi {{first_name}}! 🚚\n\nGreat news! Your order {{order_number}} has been shipped via {{courier}}!\n\n📦 Tracking Number: {{tracking_number}}\n📍 Track your package: {{tracking_link}}\n\nThank you for shopping with {{store_name}}!`,
       enabled: false,
       isPoll: false
     },
@@ -306,7 +306,7 @@ async function seedMerchantData(merchant) {
       merchant: merchant._id,
       name: "Delivery Update",
       event: "fulfillments/delivered",
-      message: `Hi {{customer_name}}! 🚚\n\nYour order {{order_number}} has been delivered!\n\nThank you for shopping with {{store_name}}!`,
+      message: `Hi {{first_name}}! 🚚\n\nYour order {{order_number}} has been delivered!\n\nThank you for shopping with {{store_name}}!`,
       enabled: false,
       isPoll: false
     },
@@ -314,7 +314,7 @@ async function seedMerchantData(merchant) {
       merchant: merchant._id,
       name: "Order Confirmed Reply",
       event: "orders/confirmed",
-      message: `Thank you {{customer_name}}! your order {{order_number}} has been confirmed. ✅ We will notify you when it ships.`,
+      message: `Thank you {{first_name}}! your order {{order_number}} has been confirmed. ✅ We will notify you when it ships.`,
       enabled: false,
       isPoll: false
     },
@@ -322,7 +322,7 @@ async function seedMerchantData(merchant) {
       merchant: merchant._id,
       name: "Cart Recovery",
       event: "checkouts/abandoned",
-      message: `Hi {{customer_name}}, you left something in your cart! 🛒\n\nClick here to finish your purchase: {{cart_link}}\n\nThank you for visiting {{store_name}}!`,
+      message: `Hi {{first_name}}, you left something in your cart! 🛒\n\nClick here to finish your purchase: {{cart_link}}\n\nThank you for visiting {{store_name}}!`,
       enabled: false,
       isPoll: false
     },

@@ -19,7 +19,7 @@ async function seedMissingTemplates(merchant, shopDomain) {
         merchant: merchant._id,
         name: "Order Confirmation",
         event: "orders/create",
-        message: `Hi {{customer_name}}! 👋\n\nThank you for your order from {{store_name}}!\n\n📦 *Order:* {{order_number}}\n🛒 *Items:* {{items_list}}\n💰 *Total:* {{grand_total}}\n📍 *Address:* {{address}}, {{city}}\n\nPlease confirm if these details are correct.`,
+        message: `Hi {{first_name}}! 👋\n\nThank you for your order from {{store_name}}!\n\n📦 *Order:* {{order_number}}\n🛒 *Items:* {{items_list}}\n💰 *Total:* {{grand_total}}\n📍 *Address:* {{address}}, {{city}}\n\nPlease confirm if these details are correct.`,
         enabled: true,
         isPoll: true,
         pollOptions: ["✅ Yes, Confirm", "❌ No, Cancel"]
@@ -28,7 +28,7 @@ async function seedMissingTemplates(merchant, shopDomain) {
         merchant: merchant._id,
         name: "Bank Transfer Confirmation",
         event: "orders/create/bank_transfer",
-        message: `🏦 *Bank Transfer Instructions!*\n\nHi {{customer_name}},\n\nThank you for your order *{{order_number}}*. 🛍️\n\nTo complete your order, please transfer *{{grand_total}}* to our bank account:\n\n*Bank:* [Bank Name]\n*Account Title:* [Account Title]\n*Account/IBAN:* [Account Number]\n\nOnce transferred, please reply to this message with a screenshot/receipt of the transfer so we can confirm your order immediately! 📲\n\nThank you!\n- {{store_name}} Team`,
+        message: `🏦 *Bank Transfer Instructions!*\n\nHi {{first_name}},\n\nThank you for your order *{{order_number}}*. 🛍️\n\nTo complete your order, please transfer *{{grand_total}}* to our bank account:\n\n*Bank:* [Bank Name]\n*Account Title:* [Account Title]\n*Account/IBAN:* [Account Number]\n\nOnce transferred, please reply to this message with a screenshot/receipt of the transfer so we can confirm your order immediately! 📲\n\nThank you!\n- {{store_name}} Team`,
         enabled: false,
         isPoll: false,
         pollOptions: []
@@ -37,7 +37,7 @@ async function seedMissingTemplates(merchant, shopDomain) {
         merchant: merchant._id,
         name: "Order Cancelled",
         event: "orders/cancelled",
-        message: `Hi {{customer_name}},\n\nYour order {{order_number}} has been cancelled.\n\nIf this was a mistake, please contact us.\n\nThank you for shopping with {{store_name}}!`,
+        message: `Hi {{first_name}},\n\nYour order {{order_number}} has been cancelled.\n\nIf this was a mistake, please contact us.\n\nThank you for shopping with {{store_name}}!`,
         enabled: false,
         isPoll: false
       },
@@ -45,7 +45,7 @@ async function seedMissingTemplates(merchant, shopDomain) {
         merchant: merchant._id,
         name: "Shipment Update",
         event: "fulfillments/update",
-        message: `Hi {{customer_name}}! 🚚\n\nGreat news! Your order {{order_number}} has been shipped via {{courier}}!\n\n📦 Tracking Number: {{tracking_number}}\n📍 Track your package: {{tracking_link}}\n\nThank you for shopping with {{store_name}}!`,
+        message: `Hi {{first_name}}! 🚚\n\nGreat news! Your order {{order_number}} has been shipped via {{courier}}!\n\n📦 Tracking Number: {{tracking_number}}\n📍 Track your package: {{tracking_link}}\n\nThank you for shopping with {{store_name}}!`,
         enabled: false,
         isPoll: false
       },
@@ -53,7 +53,7 @@ async function seedMissingTemplates(merchant, shopDomain) {
         merchant: merchant._id,
         name: "Delivery Update",
         event: "fulfillments/delivered",
-        message: `Hi {{customer_name}}! 🚚\n\nYour order {{order_number}} has been delivered!\n\nThank you for shopping with {{store_name}}!`,
+        message: `Hi {{first_name}}! 🚚\n\nYour order {{order_number}} has been delivered!\n\nThank you for shopping with {{store_name}}!`,
         enabled: false,
         isPoll: false
       },
@@ -61,7 +61,7 @@ async function seedMissingTemplates(merchant, shopDomain) {
         merchant: merchant._id,
         name: "Order Confirmed Reply",
         event: "orders/confirmed",
-        message: `Thank you {{customer_name}}! your order {{order_number}} has been confirmed. ✅ We will notify you when it ships.`,
+        message: `Thank you {{first_name}}! your order {{order_number}} has been confirmed. ✅ We will notify you when it ships.`,
         enabled: false,
         isPoll: false
       },
@@ -69,7 +69,7 @@ async function seedMissingTemplates(merchant, shopDomain) {
         merchant: merchant._id,
         name: "Cart Recovery",
         event: "checkouts/abandoned",
-        message: `Hi {{customer_name}}, you left something in your cart! 🛒\n\nClick here to finish your purchase: {{cart_link}}\n\nThank you for visiting {{store_name}}!`,
+        message: `Hi {{first_name}}, you left something in your cart! 🛒\n\nClick here to finish your purchase: {{cart_link}}\n\nThank you for visiting {{store_name}}!`,
         enabled: false,
         isPoll: false
       },
