@@ -1463,6 +1463,13 @@ class WhatsAppService {
 
             if (!isHealthy) {
                 if (retryCount < 1) {
+                    // Only auto-reconnect if NOT explicitly disconnected
+                    const session = await WhatsAppSession.findOne({ shopDomain });
+                    if (session?.status === 'disconnected') {
+                        console.warn(`[WhatsApp] Skip auto-connect for ${shopDomain} (poll): Explicitly disconnected.`);
+                        return { success: false, error: "WhatsApp is disconnected. Please connect again from dashboard." };
+                    }
+
                     console.log(`[WhatsApp] Socket not ready or hung for poll. Attempting to reconnect...`);
                     // Clear stale socket before re-init
                     const staleSock = this.sockets.get(shopDomain);

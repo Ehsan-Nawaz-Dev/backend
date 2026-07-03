@@ -270,7 +270,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
 
     // --- CASE: MISSING PHONE ---
     // If phone is missing and we have an orderId, try fetching the order to get the phone (for non-fulfillment webhooks)
-    if (!customerPhoneFormatted && orderId && merchant.shopifyAccessToken && !apiOrder) {
+    if (!customerPhoneFormatted && orderId && merchant.shopifyAccessToken && !apiOrder && topic && !topic.includes("checkout")) {
         console.log(`[ShopifyWebhook] Phone missing for topic ${topic}. Attempting to fetch order ${orderId} for data...`);
         try {
             apiOrder = await shopifyService.getOrder(shopDomain, merchant.shopifyAccessToken, orderId);
@@ -665,8 +665,13 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                         }
                     } else {
                         const errorMsg = result?.error || "Failed to send WhatsApp message (unknown error)";
-                        console.error(`[ShopifyWebhook] WhatsApp Error for ${shopDomain}: ${errorMsg}`);
-                        throw new Error(errorMsg);
+                        console.warn(`[ShopifyWebhook] WhatsApp Error for ${shopDomain}: ${errorMsg}`);
+                        if (activity) {
+                            activity.type = 'failed';
+                            activity.message = 'Failed to send WhatsApp ❌';
+                            activity.errorMessage = errorMsg;
+                            await activity.save();
+                        }
                     }
                 } else {
                     console.log(`[ShopifyWebhook] Automation DISABLED for order-confirmation. Skipping.`);
@@ -827,7 +832,13 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     }
                 } else {
                     const errorMsg = result?.error || "Failed to send WhatsApp message (unknown error)";
-                    throw new Error(errorMsg);
+                    console.warn(`[ShopifyWebhook] WhatsApp Error for ${shopDomain}: ${errorMsg}`);
+                    if (activity) {
+                        activity.type = 'failed';
+                        activity.message = 'Failed to send WhatsApp ❌';
+                        activity.errorMessage = errorMsg;
+                        await activity.save();
+                    }
                 }
             } catch (err) {
                 console.error(`[ShopifyWebhook] Error processing abandoned cart for ${shopDomain}:`, err);
