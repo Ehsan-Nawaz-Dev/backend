@@ -1409,9 +1409,12 @@ class WhatsAppService {
 
             try {
                 console.log(`[WhatsApp] 📤 Sending message to ${formattedNumber}@s.whatsapp.net`);
-                await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, { text: safeMessage });
-                console.log(`[WhatsApp] ✅ Message sent successfully to ${formattedNumber}`);
-                return { success: true };
+                const sentMsg = await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, { text: safeMessage });
+                if (!sentMsg || !sentMsg.key || !sentMsg.key.id) {
+                    throw new Error("Message sending failed (no valid message key received from Baileys)");
+                }
+                console.log(`[WhatsApp] ✅ Message sent successfully to ${formattedNumber} (ID: ${sentMsg.key.id})`);
+                return { success: true, messageId: sentMsg.key.id };
             } catch (innerError) {
                 const statusCode = innerError.output?.statusCode || innerError.output?.payload?.statusCode;
                 const errorMsg = innerError.message || innerError.output?.payload?.message || '';
@@ -1494,13 +1497,16 @@ class WhatsAppService {
                 }
             });
             // Store the sent poll message so we can decrypt vote responses later
-            if (sentMsg) {
-                await this.storePollMessage(shopDomain, sentMsg, formattedNumber, orderId);
-                console.log(`[WhatsApp] Poll sent and stored in MongoDB (key: ${sentMsg.key?.id}) for vote decryption`);
+            if (!sentMsg || !sentMsg.key || !sentMsg.key.id) {
+                console.error(`[WhatsApp] ❌ sendPoll returned empty or invalid message structure for ${formattedNumber}`);
+                return { success: false, error: "Failed to generate valid WhatsApp poll structure" };
             }
+            
+            await this.storePollMessage(shopDomain, sentMsg, formattedNumber, orderId);
+            console.log(`[WhatsApp] Poll sent and stored in MongoDB (key: ${sentMsg.key?.id}) for vote decryption`);
             console.log(`[WhatsApp] Poll sent successfully to ${formattedNumber}`);
 
-            return { success: true };
+            return { success: true, messageId: sentMsg.key.id };
         } catch (error) {
             console.error(`[WhatsApp] Error sending poll:`, error);
 

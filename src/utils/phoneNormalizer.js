@@ -203,9 +203,10 @@ const LOCAL_NUMBER_LENGTHS = {
  * 
  * @param {string} rawPhone - The raw phone number (digits only or with formatting)
  * @param {object} order - The Shopify order object (used to detect country)
+ * @param {string} defaultCountryCode - Fallback country code (e.g. 'PK', 'US')
  * @returns {string|null} - The normalized phone number or null if invalid
  */
-export function normalizePhoneNumber(rawPhone, order = null) {
+export function normalizePhoneNumber(rawPhone, order = null, defaultCountryCode = null) {
     if (!rawPhone) return null;
 
     // Step 1: Strip all non-digit characters
@@ -218,7 +219,10 @@ export function normalizePhoneNumber(rawPhone, order = null) {
     const hadPlus = rawPhone.trim().startsWith('+');
 
     // Step 3: Detect the customer's country from the order
-    const countryCode = detectCountryFromOrder(order);
+    let countryCode = detectCountryFromOrder(order);
+    if (!countryCode && defaultCountryCode) {
+        countryCode = defaultCountryCode.toUpperCase();
+    }
     const callingCode = countryCode ? COUNTRY_PHONE_MAP[countryCode] : null;
 
     console.log(`[PhoneNorm] Raw: ${rawPhone} → Digits: ${digits}, Country: ${countryCode || 'unknown'}, CallingCode: ${callingCode || 'none'}`);

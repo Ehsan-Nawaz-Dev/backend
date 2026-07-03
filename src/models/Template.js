@@ -8,6 +8,7 @@ const TemplateSchema = new mongoose.Schema(
       type: String,
       enum: [
         "orders/create",
+        "orders/create/bank_transfer",
         "checkouts/abandoned",
         "fulfillments/update",
         "fulfillments/delivered",

@@ -265,8 +265,8 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
     const { phone: customerPhoneRaw, name: customerName } = getCustomerData(orderForPlaceholders);
     const orderNumber = orderForPlaceholders.name || orderForPlaceholders.order_number || `#${orderId || 'N/A'}`;
 
-    // Format the Customer Phone (auto-detect country from order address)
-    let customerPhoneFormatted = normalizePhoneNumber(customerPhoneRaw, orderForPlaceholders);
+    // Format the Customer Phone (auto-detect country from order address, fallback to merchant country)
+    let customerPhoneFormatted = normalizePhoneNumber(customerPhoneRaw, orderForPlaceholders, merchant?.country || merchant?.defaultCountry);
 
     // --- CASE: MISSING PHONE ---
     // If phone is missing and we have an orderId, try fetching the order to get the phone (for non-fulfillment webhooks)
@@ -496,7 +496,27 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                         console.warn(`[ShopifyWebhook] Skipping API fetch - accessToken: ${!!updatedMerchant?.shopifyAccessToken}, orderId: ${orderId}`);
                     }
 
-                    const customerTemplate = await Template.findOne({ merchant: updatedMerchant?._id, event: "orders/create" });
+                    // Check if payment method is bank transfer/deposit
+                    const paymentGateways = (fullOrderData.payment_gateway_names || []).map(g => g.toLowerCase());
+                    const gateway = (fullOrderData.gateway || "").toLowerCase();
+                    const isBankTransfer = gateway.includes("bank") || 
+                                           gateway.includes("transfer") || 
+                                           gateway.includes("deposit") || 
+                                           paymentGateways.some(g => g.includes("bank") || g.includes("transfer") || g.includes("deposit"));
+
+                    let customerTemplate = null;
+                    if (isBankTransfer) {
+                        console.log(`[ShopifyWebhook] Order ${orderId} detected as Bank Transfer. Checking for specific template...`);
+                        customerTemplate = await Template.findOne({ 
+                            merchant: updatedMerchant?._id, 
+                            event: "orders/create/bank_transfer",
+                            enabled: true 
+                        });
+                    }
+
+                    if (!customerTemplate) {
+                        customerTemplate = await Template.findOne({ merchant: updatedMerchant?._id, event: "orders/create" });
+                    }
                     
                     // NEW: Filter by Payment Status if configured
                     if (customerTemplate?.targetOrderStatus && customerTemplate.targetOrderStatus !== "all") {
@@ -681,14 +701,19 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     await new Promise(resolve => setTimeout(resolve, cancelTemplate.sendingDelay * 60 * 1000));
                 }
 
+                let result;
                 if (cancelTemplate.isPoll && cancelTemplate.pollOptions?.length > 0) {
-                    await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions, orderId);
+                    result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, cancelMsg, cancelTemplate.pollOptions, orderId);
                 } else {
-                    await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
+                    result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, cancelMsg);
                 }
 
-                if (merchant?.shopifyAccessToken && orderId) {
-                    await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, orderId, merchant.orderCancelTag || "Order Cancelled", [merchant.pendingConfirmTag, merchant.orderConfirmTag]);
+                if (result?.success) {
+                    if (merchant?.shopifyAccessToken && orderId) {
+                        await shopifyService.addOrderTag(shopDomain, merchant.shopifyAccessToken, orderId, merchant.orderCancelTag || "Order Cancelled", [merchant.pendingConfirmTag, merchant.orderConfirmTag]);
+                    }
+                } else {
+                    console.error(`[ShopifyWebhook] Failed to send cancellation message for order ${orderId}: ${result?.error || 'Unknown error'}`);
                 }
             } catch (err) {
                 console.error(`[ShopifyWebhook] Error processing cancellation:`, err);
@@ -704,7 +729,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
             return res.status(200).send('ok');
         }
 
-        await logEvent("pending", req, shopDomain);
+        const activity = await logEvent("pending", req, shopDomain);
         res.status(200).send("ok");
 
         (async () => {
@@ -714,49 +739,81 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                 
                 if (!setting?.enabled || !abandonedTemplate?.enabled) {
                     console.log(`[ShopifyWebhook] Abandoned Cart skipped: setting=${!!setting?.enabled}, template=${!!abandonedTemplate?.enabled}`);
+                    if (activity) {
+                        activity.type = 'confirmed'; // Skip as processed/ignored
+                        activity.message = `Skipped: Automation is disabled 🛑`;
+                        await activity.save();
+                    }
                     return;
                 }
 
-                if (customerPhoneFormatted) {
-                    let abandonedMsg = abandonedTemplate.message;
-                    abandonedMsg = replacePlaceholders(abandonedMsg, { order, merchant });
-                    abandonedMsg = abandonedMsg.replace(/{{customer_name}}/g, customerName);
-
-                    // Usage check for abandoned cart
-                    const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
-                    const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
-                    if ((merchant.usage || 0) >= currentLimit) {
-                        if (merchant.shopifyUsageLineItemId && merchant.plan !== 'professional') {
-                            console.log(`[ShopifyWebhook] Auto-upgrade allowance for abandoned cart ${shopDomain}.`);
-                        } else {
-                            console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Abandoned Cart blocked)`);
-                            return;
-                        }
+                if (!customerPhoneFormatted) {
+                    console.warn(`[ShopifyWebhook] Abandoned checkout skipped: No phone number found.`);
+                    if (activity) {
+                        activity.type = 'failed';
+                        activity.message = 'Skipped: No phone number found 📵';
+                        await activity.save();
                     }
+                    return;
+                }
 
-                    let result;
+                let abandonedMsg = abandonedTemplate.message;
+                abandonedMsg = replacePlaceholders(abandonedMsg, { order, merchant });
+                abandonedMsg = abandonedMsg.replace(/{{customer_name}}/g, customerName);
 
-                    if (abandonedTemplate?.sendingDelay && abandonedTemplate.sendingDelay > 0) {
-                        console.log(`[ShopifyWebhook] Delaying abandoned cart message by ${abandonedTemplate.sendingDelay} minutes...`);
-                        await new Promise(resolve => setTimeout(resolve, abandonedTemplate.sendingDelay * 60 * 1000));
-                    }
-
-                    if (abandonedTemplate.isPoll && abandonedTemplate.pollOptions?.length > 0) {
-                        result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, abandonedMsg, abandonedTemplate.pollOptions, orderId);
+                // Usage check for abandoned cart
+                const planConfig = await Plan.findOne({ id: merchant.plan || 'free' });
+                const currentLimit = planConfig ? planConfig.messageLimit : (merchant.trialLimit || 10);
+                if ((merchant.usage || 0) >= currentLimit) {
+                    if (merchant.shopifyUsageLineItemId && merchant.plan !== 'professional') {
+                        console.log(`[ShopifyWebhook] Auto-upgrade allowance for abandoned cart ${shopDomain}.`);
                     } else {
-                        result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, abandonedMsg);
+                        console.warn(`[ShopifyWebhook] Limit reached for ${shopDomain} (Abandoned Cart blocked)`);
+                        if (activity) {
+                            activity.type = 'failed';
+                            activity.message = `Limit Reached (${currentLimit} messages) 🛑`;
+                            await activity.save();
+                        }
+                        return;
                     }
+                }
 
-                    if (result?.success) {
-                        const incMerchant = await Merchant.findOneAndUpdate({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } }, { new: true });
-                        import('../../services/billingService.js').then(({ checkAndChargeUsage }) => {
-                            checkAndChargeUsage(incMerchant);
-                        }).catch(err => console.error("Billing service error:", err));
-                        await automationService.trackSent(shopDomain, "abandoned_cart");
+                let result;
+
+                if (abandonedTemplate?.sendingDelay && abandonedTemplate.sendingDelay > 0) {
+                    console.log(`[ShopifyWebhook] Delaying abandoned cart message by ${abandonedTemplate.sendingDelay} minutes...`);
+                    await new Promise(resolve => setTimeout(resolve, abandonedTemplate.sendingDelay * 60 * 1000));
+                }
+
+                if (abandonedTemplate.isPoll && abandonedTemplate.pollOptions?.length > 0) {
+                    result = await whatsappService.sendPoll(shopDomain, customerPhoneFormatted, abandonedMsg, abandonedTemplate.pollOptions, orderId);
+                } else {
+                    result = await whatsappService.sendMessage(shopDomain, customerPhoneFormatted, abandonedMsg);
+                }
+
+                if (result?.success) {
+                    const incMerchant = await Merchant.findOneAndUpdate({ shopDomain }, { $inc: { usage: 1, trialUsage: merchant.plan === 'trial' ? 1 : 0 } }, { new: true });
+                    import('../../services/billingService.js').then(({ checkAndChargeUsage }) => {
+                        checkAndChargeUsage(incMerchant);
+                    }).catch(err => console.error("Billing service error:", err));
+                    await automationService.trackSent(shopDomain, "abandoned_cart");
+                    
+                    if (activity) {
+                        activity.message = 'Cart Recovery Message Sent ✅';
+                        await activity.save();
                     }
+                } else {
+                    const errorMsg = result?.error || "Failed to send WhatsApp message (unknown error)";
+                    throw new Error(errorMsg);
                 }
             } catch (err) {
                 console.error(`[ShopifyWebhook] Error processing abandoned cart for ${shopDomain}:`, err);
+                if (activity) {
+                    activity.type = 'failed';
+                    activity.message = 'Failed to send WhatsApp ❌';
+                    activity.errorMessage = err.message;
+                    await activity.save();
+                }
             }
         })();
         return;
