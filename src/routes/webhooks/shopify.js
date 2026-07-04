@@ -979,7 +979,7 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                     shopifySubscriptionId: app_subscription.admin_graphql_api_id
                 }
             );
-        } else if (app_subscription && (app_subscription.status === 'CANCELLED' || app_subscription.status === 'DECLINED')) {
+        } else if (app_subscription && ['CANCELLED', 'DECLINED', 'EXPIRED', 'FROZEN'].includes(app_subscription.status)) {
             console.log(`[ShopifyWebhook] Subscription ${app_subscription.status} for ${shopDomain}. Reverting to free.`);
             await Merchant.findOneAndUpdate(
                 { shopDomain },
