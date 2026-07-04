@@ -5,7 +5,18 @@ const AutomationSettingSchema = new mongoose.Schema(
         shopDomain: { type: String, required: true, index: true },
         type: {
             type: String,
-            enum: ["abandoned_cart", "fulfillment_update", "fulfillment_delivered", "admin-order-alert", "admin-confirmed-alert", "order-confirmation", "cancellation", "order-confirmed-reply", "cancellation-verify"],
+            enum: [
+                "abandoned_cart",
+                "fulfillment_update",
+                "fulfillment_delivered",
+                "admin-order-alert",
+                "admin-confirmed-alert",
+                "order-confirmation",
+                "cancellation",
+                "order-confirmed-reply",
+                "cancellation-verify",
+                "bank-transfer-confirmation"
+            ],
             required: true
         },
         enabled: { type: Boolean, default: false },
