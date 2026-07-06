@@ -663,6 +663,30 @@ router.post("/", verifyShopifyWebhook, async (req, res) => {
                             activity.message = 'WhatsApp Message Sent ✅ (Awaiting Customer)';
                             await activity.save();
                         }
+                    } else if (result?.queued && result?.messageId) {
+                        // Customer's phone is offline: message sits on WhatsApp's servers (✓ only).
+                        // Don't count or tag yet — when the delivery receipt (✓✓) arrives,
+                        // deliveryService completes the count + tag + dashboard status automatically.
+                        console.warn(`[ShopifyWebhook] Message queued (customer offline) for ${shopDomain}, order ${orderId}. Waiting for delivery receipt.`);
+                        try {
+                            const { DeferredDelivery } = await import("../../models/DeferredDelivery.js");
+                            await DeferredDelivery.create({
+                                shopDomain,
+                                messageKeyId: result.messageId,
+                                orderId: String(orderId),
+                                activityId: activity?._id,
+                                customerPhone: customerPhoneFormatted,
+                                kind: "order-confirmation"
+                            });
+                        } catch (defErr) {
+                            console.error(`[ShopifyWebhook] Failed to save deferred delivery:`, defErr.message);
+                        }
+                        if (activity) {
+                            activity.type = 'failed';
+                            activity.message = 'Not Delivered Yet (Customer Offline) ⏳';
+                            activity.errorMessage = 'Message is on WhatsApp servers but has not reached the customer. The order will be tagged and counted automatically once it is delivered.';
+                            await activity.save();
+                        }
                     } else {
                         const errorMsg = result?.error || "Failed to send WhatsApp message (unknown error)";
                         console.warn(`[ShopifyWebhook] WhatsApp Error for ${shopDomain}: ${errorMsg}`);

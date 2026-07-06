@@ -35,6 +35,57 @@ class WhatsAppService {
         this.reconnectTimeouts = new Map(); // shopDomain -> timeout ID
         this.connectionAlive = new Map(); // shopDomain -> boolean (true = connection is open)
         this.connectionOpenedAt = new Map(); // shopDomain -> timestamp (when connection opened)
+        this.ackWaiters = new Map(); // messageId -> callback waiting for a status ack
+        this.recentAcks = new Map(); // messageId -> highest ack status seen (handles ack-before-wait race)
+    }
+
+    // Record an ack status for a message and notify any waiter
+    recordAck(messageId, status) {
+        if (!messageId || typeof status !== "number") return;
+        const prev = this.recentAcks.get(messageId) || 0;
+        const best = Math.max(prev, status);
+        this.recentAcks.set(messageId, best);
+        // Cap map size to avoid memory leaks
+        if (this.recentAcks.size > 500) {
+            const firstKey = this.recentAcks.keys().next().value;
+            this.recentAcks.delete(firstKey);
+        }
+        const waiter = this.ackWaiters.get(messageId);
+        if (waiter) waiter(best);
+
+        // Delivery receipt (✓✓) just arrived — if an order was waiting on this
+        // message (customer was offline at send time), count + tag it now.
+        if (prev < 3 && best >= 3) {
+            import("./deliveryService.js")
+                .then(({ completeDeferredDelivery }) => completeDeferredDelivery(messageId))
+                .catch(err => console.error("[WhatsApp] Deferred delivery completion error:", err.message));
+        }
+    }
+
+    /**
+     * Waits for WhatsApp's acknowledgement of a sent message.
+     * Status codes: 0=ERROR, 1=PENDING, 2=SERVER_ACK (✓ reached WhatsApp),
+     * 3=DELIVERY_ACK (✓✓ delivered to customer's phone), 4=READ.
+     * Resolves with the highest status seen — immediately on delivery (>=3),
+     * otherwise when the timeout expires.
+     */
+    waitForMessageAck(messageId, timeoutMs = 25000) {
+        const already = this.recentAcks.get(messageId) || 0;
+        if (already >= 3) return Promise.resolve(already);
+
+        return new Promise((resolve) => {
+            let best = already;
+            const finish = () => {
+                clearTimeout(timer);
+                this.ackWaiters.delete(messageId);
+                resolve(best);
+            };
+            const timer = setTimeout(finish, timeoutMs);
+            this.ackWaiters.set(messageId, (status) => {
+                if (status > best) best = status;
+                if (best >= 3) finish();
+            });
+        });
     }
 
     // Store a message in the in-memory cache (for poll vote decryption)
@@ -507,6 +558,23 @@ class WhatsAppService {
 
             sock.ev.on("creds.update", saveCreds);
             this.pendingInits.delete(shopDomain);
+
+            // Track ack status of our outgoing messages (server ack / delivered / read)
+            sock.ev.on("messages.update", (updates) => {
+                for (const u of updates) {
+                    this.recordAck(u.key?.id, u.update?.status);
+                }
+            });
+            // Delivery/read receipts also arrive on this event
+            sock.ev.on("message-receipt.update", (receipts) => {
+                for (const r of receipts) {
+                    const type = r.receipt?.type;
+                    // receipt.type: undefined/"delivery" => delivered, "read" => read
+                    if (r.key?.id && (type === undefined || type === "delivery" || type === "read")) {
+                        this.recordAck(r.key.id, type === "read" ? 4 : 3);
+                    }
+                }
+            });
 
             sock.ev.on("messages.upsert", async (m) => {
                 if (m.type !== "notify") return;
@@ -1385,6 +1453,25 @@ class WhatsAppService {
             }
 
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
+
+            // Verify the number is registered on WhatsApp BEFORE sending.
+            // Baileys accepts sends to non-existent JIDs without any error,
+            // which makes the app show "Sent ✅" while the customer never receives anything.
+            let targetJid = `${formattedNumber}@s.whatsapp.net`;
+            try {
+                const [check] = await sock.onWhatsApp(targetJid);
+                if (!check?.exists) {
+                    console.warn(`[WhatsApp] ❌ ${formattedNumber} is NOT registered on WhatsApp. Aborting send.`);
+                    return { success: false, error: `Number +${formattedNumber} is not registered on WhatsApp (check country code / phone format)` };
+                }
+                if (check.jid) {
+                    targetJid = check.jid; // Canonical JID from WhatsApp (handles number variants)
+                    console.log(`[WhatsApp] Verified number on WhatsApp. Canonical JID: ${targetJid}`);
+                }
+            } catch (checkErr) {
+                console.warn(`[WhatsApp] onWhatsApp lookup failed for ${formattedNumber}: ${checkErr.message}. Proceeding with raw JID.`);
+            }
+
             const safeMessage = this.randomizeMessage(message);
 
             // 3. ADVANCED HUMAN SIMULATION
@@ -1408,13 +1495,29 @@ class WhatsAppService {
             await new Promise(resolve => setTimeout(resolve, progressiveDelay));
 
             try {
-                console.log(`[WhatsApp] 📤 Sending message to ${formattedNumber}@s.whatsapp.net`);
-                const sentMsg = await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, { text: safeMessage });
+                console.log(`[WhatsApp] 📤 Sending message to ${targetJid}`);
+                const sentMsg = await sock.sendMessage(targetJid, { text: safeMessage });
                 if (!sentMsg || !sentMsg.key || !sentMsg.key.id) {
                     throw new Error("Message sending failed (no valid message key received from Baileys)");
                 }
-                console.log(`[WhatsApp] ✅ Message sent successfully to ${formattedNumber} (ID: ${sentMsg.key.id})`);
-                return { success: true, messageId: sentMsg.key.id };
+
+                // Relay is NOT delivery — success ONLY when the message reaches the customer's phone (✓✓)
+                console.log(`[WhatsApp] Message relayed (ID: ${sentMsg.key.id}). Waiting for delivery ack...`);
+                const ackStatus = await this.waitForMessageAck(sentMsg.key.id);
+
+                if (ackStatus >= 3) {
+                    console.log(`[WhatsApp] ✅✅ DELIVERED to ${formattedNumber} (ID: ${sentMsg.key.id})`);
+                    return { success: true, messageId: sentMsg.key.id };
+                }
+                console.warn(`[WhatsApp] ❌ NOT delivered to ${formattedNumber} (last status: ${ackStatus}). Treating as NOT sent — no count, no tag.`);
+                return {
+                    success: false,
+                    queued: ackStatus === 2, // On WhatsApp's servers (✓) — delivery receipt will complete it later
+                    error: ackStatus === 2
+                        ? "Message reached WhatsApp but was NOT delivered to the customer (phone offline or unreachable)"
+                        : "WhatsApp did not acknowledge the message — treated as not sent",
+                    messageId: sentMsg.key.id
+                };
             } catch (innerError) {
                 const statusCode = innerError.output?.statusCode || innerError.output?.payload?.statusCode;
                 const errorMsg = innerError.message || innerError.output?.payload?.message || '';
@@ -1489,14 +1592,30 @@ class WhatsAppService {
 
             const formattedNumber = phoneNumber.replace(/[^0-9]/g, "");
 
+            // Verify the number is registered on WhatsApp BEFORE sending (see sendMessage).
+            let targetJid = `${formattedNumber}@s.whatsapp.net`;
+            try {
+                const [check] = await sock.onWhatsApp(targetJid);
+                if (!check?.exists) {
+                    console.warn(`[WhatsApp] ❌ ${formattedNumber} is NOT registered on WhatsApp. Aborting poll send.`);
+                    return { success: false, error: `Number +${formattedNumber} is not registered on WhatsApp (check country code / phone format)` };
+                }
+                if (check.jid) {
+                    targetJid = check.jid;
+                    console.log(`[WhatsApp] Verified number on WhatsApp. Canonical JID: ${targetJid}`);
+                }
+            } catch (checkErr) {
+                console.warn(`[WhatsApp] onWhatsApp lookup failed for ${formattedNumber}: ${checkErr.message}. Proceeding with raw JID.`);
+            }
+
             // Add a small human-like delay for polls (2 - 5 seconds)
             const randomDelay = Math.floor(Math.random() * 3000) + 2000;
             console.log(`[WhatsApp] Throttling poll for ${formattedNumber} for ${randomDelay}ms...`);
             await new Promise(resolve => setTimeout(resolve, randomDelay));
 
-            console.log(`[WhatsApp] Sending poll to ${formattedNumber}@s.whatsapp.net with options:`, pollOptions);
+            console.log(`[WhatsApp] Sending poll to ${targetJid} with options:`, pollOptions);
 
-            const sentMsg = await sock.sendMessage(`${formattedNumber}@s.whatsapp.net`, {
+            const sentMsg = await sock.sendMessage(targetJid, {
                 poll: {
                     name: pollName,
                     values: pollOptions,
@@ -1511,9 +1630,24 @@ class WhatsAppService {
             
             await this.storePollMessage(shopDomain, sentMsg, formattedNumber, orderId);
             console.log(`[WhatsApp] Poll sent and stored in MongoDB (key: ${sentMsg.key?.id}) for vote decryption`);
-            console.log(`[WhatsApp] Poll sent successfully to ${formattedNumber}`);
 
-            return { success: true, messageId: sentMsg.key.id };
+            // Relay is NOT delivery — success ONLY when the poll reaches the customer's phone (✓✓)
+            console.log(`[WhatsApp] Poll relayed (ID: ${sentMsg.key.id}). Waiting for delivery ack...`);
+            const ackStatus = await this.waitForMessageAck(sentMsg.key.id);
+
+            if (ackStatus >= 3) {
+                console.log(`[WhatsApp] ✅✅ Poll DELIVERED to ${formattedNumber} (ID: ${sentMsg.key.id})`);
+                return { success: true, messageId: sentMsg.key.id };
+            }
+            console.warn(`[WhatsApp] ❌ Poll NOT delivered to ${formattedNumber} (last status: ${ackStatus}). Treating as NOT sent — no count, no tag.`);
+            return {
+                success: false,
+                queued: ackStatus === 2, // On WhatsApp's servers (✓) — delivery receipt will complete it later
+                error: ackStatus === 2
+                    ? "Poll reached WhatsApp but was NOT delivered to the customer (phone offline or unreachable)"
+                    : "WhatsApp did not acknowledge the poll — treated as not sent",
+                messageId: sentMsg.key.id
+            };
         } catch (error) {
             console.error(`[WhatsApp] Error sending poll:`, error);
 

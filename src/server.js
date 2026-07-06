@@ -8,8 +8,42 @@ import { connectDB } from "./config/db.js";
 import apiRouter from "./routes/index.js";
 import planRoutes from './routes/plans.js';
 import { whatsappService } from "./services/whatsappService.js";
+import { ActivityLog } from "./models/ActivityLog.js";
+import { Template } from "./models/Template.js";
 
 dotenv.config();
+
+/**
+ * Watchdog: order webhooks create the activity as 'pending' ("Processing Order
+ * Notification...") BEFORE the WhatsApp message is sent. If the server restarts
+ * or crashes mid-send (including while waiting on a template sendingDelay),
+ * the activity stays 'pending' forever and the dashboard falsely shows
+ * "waiting for customer confirmation". Surface those as failed instead.
+ */
+const recoverStuckActivities = async () => {
+  try {
+    // Respect the largest configured sendingDelay so delayed sends aren't flagged early
+    const maxDelayTpl = await Template.findOne({ sendingDelay: { $gt: 0 } }).sort({ sendingDelay: -1 });
+    const graceMinutes = 15 + (maxDelayTpl?.sendingDelay || 0);
+    const cutoff = new Date(Date.now() - graceMinutes * 60 * 1000);
+
+    const result = await ActivityLog.updateMany(
+      { type: "pending", message: "Processing Order Notification...", createdAt: { $lt: cutoff } },
+      {
+        $set: {
+          type: "failed",
+          message: "Failed to send WhatsApp ❌",
+          errorMessage: "Send was interrupted (server restarted or WhatsApp connection dropped before the message went out)",
+        },
+      }
+    );
+    if (result.modifiedCount > 0) {
+      console.warn(`[Watchdog] Marked ${result.modifiedCount} interrupted send(s) as failed (stuck in 'Processing' for over ${graceMinutes} min).`);
+    }
+  } catch (err) {
+    console.error("[Watchdog] Error recovering stuck activities:", err.message);
+  }
+};
 
 const app = express();
 
@@ -98,6 +132,8 @@ if (process.env.VERCEL !== "1") {
   connectDB()
     .then(() => {
       whatsappService.warmupSessions(); // Restore active connections
+      setTimeout(recoverStuckActivities, 30 * 1000); // Sweep once after boot
+      setInterval(recoverStuckActivities, 10 * 60 * 1000); // Then every 10 minutes
       httpServer.listen(PORT, () => {
         console.log(`WhatFlow backend running on port ${PORT}`);
         console.log(`Socket.IO server ready`);
