@@ -5,6 +5,17 @@ import dotenv from "dotenv";
 import { Merchant } from "../models/Merchant.js";
 import { Template } from "../models/Template.js";
 import { AutomationSetting } from "../models/AutomationSetting.js";
+import { ActivityLog } from "../models/ActivityLog.js";
+import { Contact } from "../models/Contact.js";
+import { NotificationSettings } from "../models/NotificationSettings.js";
+import { WhatsAppAuth } from "../models/WhatsAppAuth.js";
+import { WhatsAppSession } from "../models/WhatsAppSession.js";
+import { AutomationStat } from "../models/AutomationStat.js";
+import { Campaign } from "../models/Campaign.js";
+import { ChatButtonSettings } from "../models/ChatButtonSettings.js";
+import { PollMessage } from "../models/PollMessage.js";
+import { whatsappService } from "../services/whatsappService.js";
+
 
 dotenv.config();
 
@@ -396,13 +407,37 @@ async function seedMerchantData(merchant) {
 // Handle app uninstall webhook
 router.post("/uninstall", async (req, res) => {
   try {
-    const shopDomain = req.get("x-shopify-shop-domain");
+    const shopDomain = req.get("x-shopify-shop-domain") || req.body?.domain;
     if (shopDomain) {
-      await Merchant.findOneAndUpdate(
-        { shopDomain },
-        { isActive: false, shopifyAccessToken: null }
-      );
-      console.log(`[OAuth] App uninstalled for ${shopDomain}`);
+      console.log(`[OAuth] Uninstall webhook triggered for ${shopDomain}. Disconnecting WhatsApp client and purging all data.`);
+      
+      // Disconnect WhatsApp client if active
+      try {
+        await whatsappService.disconnectClient(shopDomain);
+        console.log(`[OAuth] WhatsApp client disconnected for ${shopDomain} upon uninstall.`);
+      } catch (err) {
+        console.warn(`[OAuth] Error disconnecting WhatsApp client:`, err.message);
+      }
+
+      // Perform a full database wipe for the merchant (consistent with webhooks/shopify.js)
+      const merchantToDelete = await Merchant.findOne({ shopDomain });
+      if (merchantToDelete) {
+        await Promise.all([
+          Merchant.deleteOne({ _id: merchantToDelete._id }),
+          ActivityLog.deleteMany({ merchant: merchantToDelete._id }),
+          AutomationSetting.deleteMany({ shopDomain }),
+          Template.deleteMany({ merchant: merchantToDelete._id }),
+          Contact.deleteMany({ merchant: merchantToDelete._id }),
+          NotificationSettings.deleteMany({ merchant: merchantToDelete._id }),
+          WhatsAppAuth.deleteMany({ shopDomain }),
+          WhatsAppSession.deleteMany({ shopDomain }),
+          AutomationStat.deleteMany({ shopDomain }),
+          Campaign.deleteMany({ shopDomain }),
+          ChatButtonSettings.deleteMany({ shopDomain }),
+          PollMessage.deleteMany({ shopDomain })
+        ]);
+        console.log(`[OAuth] Successfully deleted all data for ${shopDomain} upon uninstall.`);
+      }
     }
     res.status(200).send("OK");
   } catch (error) {

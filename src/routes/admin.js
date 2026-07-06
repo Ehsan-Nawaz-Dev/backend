@@ -14,6 +14,8 @@ import { Lead } from "../models/Lead.js";
 import { GlobalNotification } from "../models/GlobalNotification.js";
 import { Admin } from "../models/Admin.js";
 import { Ticket } from "../models/Ticket.js";
+import { PollMessage } from "../models/PollMessage.js";
+
 
 const router = Router();
 
@@ -51,7 +53,7 @@ router.delete("/broadcast/:id", async (req, res) => {
 // GET /api/admin/merchants - List all merchants with connection status
 router.get("/merchants", async (req, res) => {
     try {
-        const merchants = await Merchant.find().sort({ createdAt: -1 }).lean();
+        const merchants = await Merchant.find({ shopifyAccessToken: { $ne: null, $exists: true } }).sort({ createdAt: -1 }).lean();
         const sessions = await WhatsAppSession.find().lean();
         const plans = await Plan.find().lean();
 
@@ -227,7 +229,7 @@ router.post("/merchants/extend-trial", async (req, res) => {
 // GET /api/admin/stats - Get subscription analytics
 router.get("/stats", async (req, res) => {
     try {
-        const merchants = await Merchant.find({ billingStatus: 'active' }).lean();
+        const merchants = await Merchant.find({ billingStatus: 'active', shopifyAccessToken: { $ne: null, $exists: true } }).lean();
         const plans = await Plan.find().lean();
 
         const planMap = plans.reduce((acc, p) => {
@@ -273,16 +275,20 @@ router.delete("/merchants/:shopDomain", async (req, res) => {
         await WhatsAppSession.deleteOne({ shopDomain });
         await WhatsAppAuth.deleteMany({ shopDomain });
 
-        // 3. Delete based on merchant ID (if found)
+        // 3. Delete based on merchant ID (if found) or shop domain
         if (merchantId) {
             await Template.deleteMany({ merchant: merchantId });
-            await AutomationSetting.deleteMany({ merchant: merchantId });
-            await AutomationStat.deleteMany({ merchant: merchantId });
-            await Campaign.deleteMany({ merchant: merchantId });
-            await ChatButtonSettings.deleteMany({ merchant: merchantId });
             await NotificationSettings.deleteMany({ merchant: merchantId });
-            await Lead.deleteMany({ merchant: merchantId });
         }
+
+        // Delete collections using shopDomain
+        await Promise.all([
+            AutomationSetting.deleteMany({ shopDomain }),
+            AutomationStat.deleteMany({ shopDomain }),
+            Campaign.deleteMany({ shopDomain }),
+            ChatButtonSettings.deleteMany({ shopDomain }),
+            PollMessage.deleteMany({ shopDomain })
+        ]);
 
         // 4. Delete Activity Logs
         if (merchantId) {
