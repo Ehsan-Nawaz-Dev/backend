@@ -1398,6 +1398,20 @@ class WhatsAppService {
         }
     }
 
+    async getStoredLIDForPN(shopDomain, targetJid) {
+        try {
+            const mapping = await WhatsAppAuth.findOne({
+                shopDomain,
+                dataType: "lid-mapping",
+                id: targetJid
+            });
+            return mapping?.data || null;
+        } catch (err) {
+            console.warn(`[WhatsApp] getStoredLIDForPN lookup failed:`, err.message);
+            return null;
+        }
+    }
+
     async sendMessage(shopDomain, phoneNumber, message, retryCount = 0) {
         try {
             console.log(`[WhatsApp] sendMessage called for ${shopDomain} to ${phoneNumber}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
@@ -1470,6 +1484,13 @@ class WhatsAppService {
                 }
             } catch (checkErr) {
                 console.warn(`[WhatsApp] onWhatsApp lookup failed for ${formattedNumber}: ${checkErr.message}. Proceeding with raw JID.`);
+            }
+
+            // Resolve mapped LID if available to prevent ERROR 463
+            const mappedLid = await this.getStoredLIDForPN(shopDomain, targetJid);
+            if (mappedLid) {
+                console.log(`[WhatsApp] Routing message via mapped LID: ${mappedLid} instead of PN: ${targetJid}`);
+                targetJid = mappedLid;
             }
 
             const safeMessage = this.randomizeMessage(message);
@@ -1606,6 +1627,13 @@ class WhatsAppService {
                 }
             } catch (checkErr) {
                 console.warn(`[WhatsApp] onWhatsApp lookup failed for ${formattedNumber}: ${checkErr.message}. Proceeding with raw JID.`);
+            }
+
+            // Resolve mapped LID if available to prevent ERROR 463
+            const mappedLid = await this.getStoredLIDForPN(shopDomain, targetJid);
+            if (mappedLid) {
+                console.log(`[WhatsApp] Routing poll via mapped LID: ${mappedLid} instead of PN: ${targetJid}`);
+                targetJid = mappedLid;
             }
 
             // Add a small human-like delay for polls (2 - 5 seconds)
